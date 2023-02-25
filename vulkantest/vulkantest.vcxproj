@@ -221,16 +221,21 @@
     <ClCompile Include="libs\imgui\imgui_widgets.cpp" />
     <ClCompile Include="libs\tiny_obj\tiny_obj_loader.cc" />
     <ClCompile Include="libs\vk-bootstrap\VkBootstrap.cpp" />
+    <ClCompile Include="src\VulkanRenderer\PipelineBuilder.cpp" />
     <ClCompile Include="src\Application.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\VulkanRenderer\vktypes.h" />
     <ClCompile Include="src\VulkanRenderer\vkinit.cpp" />
-    <ClCompile Include="src\VulkanRenderer\vkutils.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\VulkanRenderer\PipelineBuilder.h" />
     <ClInclude Include="src\Application.h" />
     <ClInclude Include="src\VulkanRenderer\vkinit.h" />
     <ClInclude Include="src\VulkanRenderer\vkutils.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\trifrag.glsl" />
+    <None Include="shaders\trivert.glsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
