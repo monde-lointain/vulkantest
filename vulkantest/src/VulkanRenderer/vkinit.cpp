@@ -2,7 +2,7 @@
 
 VkCommandPoolCreateInfo
 vkinit::command_pool_create_info(
-    uint32_t queue_family_index, 
+    uint32_t queue_family_index,
     VkCommandPoolCreateFlags flags
 )
 {
@@ -16,8 +16,8 @@ vkinit::command_pool_create_info(
 
 VkCommandBufferAllocateInfo
 vkinit::command_buffer_allocate_info(
-    VkCommandPool pool, 
-    uint32_t count, 
+    VkCommandPool pool,
+    uint32_t count,
     VkCommandBufferLevel level
 )
 {
@@ -31,9 +31,9 @@ vkinit::command_buffer_allocate_info(
     return command_buffer;
 }
 
-VkPipelineShaderStageCreateInfo 
+VkPipelineShaderStageCreateInfo
 vkinit::shader_stage_create_info(
-    VkShaderStageFlagBits stage, 
+    VkShaderStageFlagBits stage,
     VkShaderModule module
 )
 {
@@ -112,9 +112,9 @@ vkinit::color_blend_attachment_state()
 {
     VkPipelineColorBlendAttachmentState blend_attachment = {
         .blendEnable = VK_FALSE,
-        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | 
-                          VK_COLOR_COMPONENT_G_BIT | 
-                          VK_COLOR_COMPONENT_B_BIT | 
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+                          VK_COLOR_COMPONENT_G_BIT |
+                          VK_COLOR_COMPONENT_B_BIT |
                           VK_COLOR_COMPONENT_A_BIT
     };
     return blend_attachment;
