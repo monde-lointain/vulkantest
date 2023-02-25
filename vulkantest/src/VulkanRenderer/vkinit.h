@@ -37,4 +37,7 @@ namespace vkinit
 
     VkPipelineColorBlendAttachmentState
     color_blend_attachment_state();
+
+    VkPipelineLayoutCreateInfo
+    pipeline_layout_create_info();
 };	  // namespace vkinit

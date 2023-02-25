@@ -37,10 +37,7 @@ struct Application
 
     void init_framebuffers();
 
-    bool load_shader_module(
-        const char *filename, 
-        VkShaderModule &out_shader_module
-    ) const;
+    VkShaderModule load_shader_module(const char* filename) const;
 
     void init_commands();
 
@@ -113,6 +110,12 @@ struct Application
      * subpasses that make up a render pass.
      */
     VkRenderPass render_pass = nullptr;
+
+    /** The graphics pipeline */
+    VkPipeline pipeline = nullptr;
+
+    /** The pipeline layout for resources. */
+    VkPipelineLayout pipeline_layout = nullptr;
 
     /** The main buffer for writing commands into. */
     VkCommandBuffer main_command_buffer;
