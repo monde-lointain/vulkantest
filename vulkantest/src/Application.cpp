@@ -2,11 +2,14 @@
 
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <stdexcept>
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 #include <vk-bootstrap/VkBootstrap.h>
 
+#include "VulkanRenderer/PipelineBuilder.h"
 #include "VulkanRenderer/vkinit.h"
 #include "VulkanRenderer/vkutils.h"
 
@@ -68,7 +71,6 @@ void Application::render()
             TIMEOUT_PERIOD
         );
     } while (result == VK_TIMEOUT);
-
     VK_CHECK(vkResetFences(device, 1, &render_fence));
 
     // Request an image from swapchain
@@ -92,7 +94,6 @@ void Application::render()
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         .pInheritanceInfo = nullptr
     };
-
     VK_CHECK(vkBeginCommandBuffer(main_command_buffer, &cmd_buf_begin_info));
 
     // Set the draw color for clearing the screen
@@ -110,7 +111,6 @@ void Application::render()
         .clearValueCount = 1,
         .pClearValues = &clear_value
     };
-
     vkCmdBeginRenderPass(
         main_command_buffer, 
         &render_pass_begin_info,
@@ -135,7 +135,6 @@ void Application::render()
         .signalSemaphoreCount = 1,
         .pSignalSemaphores = &render_semaphore
     };
-
     VK_CHECK(vkQueueSubmit(queue, 1, &submit_info, render_fence));
 
     // Present the image to the swap chain
@@ -148,7 +147,6 @@ void Application::render()
         .pSwapchains = &swapchain,
         .pImageIndices = &swapchain_image_index
     };
-
     VK_CHECK(vkQueuePresentKHR(queue, &present_info));
 }
 
@@ -166,14 +164,13 @@ void Application::initialize()
         return;
     }
 
+    // Create a window
     window = SDL_CreateWindow(
         window_name,
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         (int)window_extent.width, (int)window_extent.height,
         SDL_WINDOW_VULKAN | SDL_WINDOW_BORDERLESS
     );
-
-    // Create a window
     if (!window)
     {
         SDL_ShowSimpleMessageBox(
@@ -223,7 +220,7 @@ void Application::destroy() const
     vkDestroyCommandPool(device, command_pool, nullptr);
     vkDestroyRenderPass(device, render_pass, nullptr);
     vkDestroySwapchainKHR(device, swapchain, nullptr);
-    for (int i = 0; i < framebuffers.size(); i++)
+    for (size_t i = 0; i < framebuffers.size(); i++)
     {
         vkDestroyFramebuffer(device, framebuffers[i], nullptr);
         vkDestroyImageView(device, swapchain_image_views[i], nullptr);
@@ -274,9 +271,7 @@ void Application::init_instance()
 
     // Get the graphics queue attributes
     queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
-    graphics_queue_index = vkb_device.get_queue_index(
-        vkb::QueueType::graphics
-    ).value();
+    graphics_queue_index = (int)vkb_device.get_queue_index(vkb::QueueType::graphics).value();
 }
 
 void Application::init_swapchain()
@@ -286,7 +281,6 @@ void Application::init_swapchain()
     builder.use_default_format_selection();
     builder.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR); // use vsync
     builder.set_desired_extent(window_extent.width, window_extent.height);
-
     vkb::Swapchain vkbSwapchain = builder.build().value();
 
     swapchain = vkbSwapchain.swapchain;
@@ -332,7 +326,6 @@ void Application::init_default_renderpass()
         .subpassCount = 1,
         .pSubpasses = &subpass
     };
-
     VK_CHECK(vkCreateRenderPass(
         device, 
         &render_pass_create_info, 
@@ -372,17 +365,16 @@ void Application::init_framebuffers()
     }
 }
 
-bool Application::load_shader_module(
-    const char *filename, 
-    VkShaderModule &out_shader_module
-) const
+VkShaderModule Application::load_shader_module(const char* filename) const
 {
     // Open the binary file for reading, with the cursor at the end
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
     if (!file.is_open())
     {
-        return false;
+        std::string err("Failed to open file: ");
+        err += filename;
+        throw std::runtime_error(err);
     }
 
     // Get the file size using the current position of the cursor
@@ -397,7 +389,6 @@ bool Application::load_shader_module(
     // Read the file into the buffer
     file.read(reinterpret_cast<char *>(buffer.data()), (int64_t)file_size);
 
-    // Close the file
     file.close();
 
     // Create a new shader module
@@ -409,20 +400,14 @@ bool Application::load_shader_module(
     };
 
     VkShaderModule shader_module;
-    const VkResult res = vkCreateShaderModule(
+    VK_CHECK(vkCreateShaderModule(
         device, 
         &shader_module_create_info,
         nullptr, 
-        &shader_module
+        &shader_module)
     );
-    if (res != VK_SUCCESS)
-    {
-        return false;
-    }
 
-    out_shader_module = shader_module;
-
-    return true;
+    return shader_module;
 }
 
 void Application::init_commands()
@@ -433,7 +418,6 @@ void Application::init_commands()
             graphics_queue_index,
             VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
         );
-
     VK_CHECK(vkCreateCommandPool(
         device, 
         &command_pool_create_info,
@@ -444,7 +428,6 @@ void Application::init_commands()
     // Allocate the main command buffer
     const VkCommandBufferAllocateInfo command_buffer_allocate_info =
         vkinit::command_buffer_allocate_info(command_pool, 1);
-
     VK_CHECK(vkAllocateCommandBuffers(
         device,
         &command_buffer_allocate_info,
@@ -460,7 +443,6 @@ void Application::init_sync_objects()
         .pNext = nullptr,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
-
     VK_CHECK(vkCreateFence(device, &fence_create_info, nullptr, &render_fence));
 
     // Create semaphores for synchronizing the rendering and presenting pipeline
@@ -470,7 +452,6 @@ void Application::init_sync_objects()
         .pNext = nullptr,
         .flags = 0
     };
-
     VK_CHECK(vkCreateSemaphore(
         device, 
         &semaphore_create_info, 
@@ -487,27 +468,52 @@ void Application::init_sync_objects()
 
 void Application::init_pipelines()
 {
-    VkShaderModule triangle_frag_shader;
-    const char* trifrag_shader_fname = "shaders/spirv/trifrag.spv";
+    // Load the shaders into shader modules
+    std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
 
-    if (!load_shader_module(trifrag_shader_fname, triangle_frag_shader))
-    {
-        std::cerr << "Failed to build triangle fragment shader module.\n";
-    }
-    else
-    {
-        std::cout << "Loaded " << trifrag_shader_fname << "\n";
-    }
+    VkShaderModule triangle_frag_shader =
+        load_shader_module("shaders/spirv/trifrag.spv");
+    shader_stages.push_back(
+        vkinit::shader_stage_create_info(
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            triangle_frag_shader
+        )
+    );
 
-    VkShaderModule triangle_vert_shader;
-    const char* trivert_shader_fname = "shaders/spirv/trivert.spv";
+    VkShaderModule triangle_vert_shader =
+        load_shader_module("shaders/spirv/trivert.spv");
+    shader_stages.push_back(
+        vkinit::shader_stage_create_info(
+            VK_SHADER_STAGE_VERTEX_BIT,
+            triangle_vert_shader
+        )
+    );
 
-    if (!load_shader_module(trivert_shader_fname, triangle_vert_shader))
-    {
-        std::cerr << "Failed to build triangle vertex shader module.\n";
-    }
-    else
-    {
-        std::cout << "Loaded " << trivert_shader_fname << "\n";
-    }
+    // Create a pipeline layout
+    const VkPipelineLayoutCreateInfo layout_info =
+        vkinit::pipeline_layout_create_info();
+    VK_CHECK(vkCreatePipelineLayout(
+        device, 
+        &layout_info, 
+        nullptr, 
+        &pipeline_layout)
+    );
+
+    // Fill out the pipeline builder
+    PipelineBuilder builder = {
+        .shader_stages = shader_stages,
+        .vertex_input = vkinit::vertex_input_state_create_info(),
+        .input_assembly = vkinit::input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST),
+        .viewport = { 0.0f, 0.0f,
+                      (float)window_extent.width, (float)window_extent.height, 
+                      0.0f, 1.0f },
+        .scissor = { { 0, 0 }, window_extent },
+        .raster = vkinit::rasterization_state_create_info(VK_POLYGON_MODE_FILL),
+        .blend_attachment = vkinit::color_blend_attachment_state(),
+        .multisample = vkinit::multisample_state_create_info(),
+        .pipeline_layout = pipeline_layout
+    };
+
+    // Build the pipeline
+    pipeline = builder.build_pipeline(device, render_pass);
 }
