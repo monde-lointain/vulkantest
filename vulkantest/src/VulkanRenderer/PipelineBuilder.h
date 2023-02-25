@@ -4,7 +4,7 @@
 
 #include <vulkan/vulkan_core.h>
 
-/** Creates a pipeline layout for resources */
+/** Defines a pipeline for resources to be passed through */
 struct PipelineBuilder
 {
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
