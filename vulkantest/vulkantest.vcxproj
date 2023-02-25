@@ -143,7 +143,7 @@
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <OpenMPSupport>true</OpenMPSupport>
       <AssemblerOutput>AssemblyAndSourceCode</AssemblerOutput>
-      <DisableSpecificWarnings>4100;4189</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4100;</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -190,7 +190,7 @@
       <OpenMPSupport>true</OpenMPSupport>
       <AssemblerOutput>AssemblyAndSourceCode</AssemblerOutput>
       <CallingConvention>FastCall</CallingConvention>
-      <DisableSpecificWarnings>4100;4189</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4100;</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

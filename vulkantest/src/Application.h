@@ -34,52 +34,66 @@ struct Application
 	//void init_scene();
 	//void init_descriptors();
 
-	/** The Vulkan context. Used to access Vulkan drivers */
+	/** The Vulkan instance. Used to access Vulkan drivers. */
 	VkInstance instance = nullptr;
 
 	/**
-	 * Debug message handler. Passes along debug messages to a designated debug
-	 * callback function
+	 * The Vulkan debug message handler. Passes along debug messages to a
+	 * designated debug callback function.
 	 */
 	VkDebugUtilsMessengerEXT debug_messenger = nullptr;
 
-	/**
-	 * Represents a GPU installed in the system. What commands are actually
-	 * executed on.
-	 */
+	/** The Vulkan physical device. Represents an actual GPU on the system. */
 	VkPhysicalDevice gpu = nullptr;
 
 	/**
-	 * A logical device created on top of the physical device. Is used for
-	 * allocating resources and executing commands on the physical device.
+	 * The Vulkan device. Used for allocating resources and executing commands
+	 * on the physical device.
 	 */
 	VkDevice device = nullptr;
 
+	/** The Vulkan device queue */
+	VkQueue queue = nullptr;
+
 	/**
-	 * Represents a platform-specific surface/window that is used for
-	 * presenting rendered graphics to the user
+	 * The Vulkan surface. Represents a platform-specific surface/window that is
+	 * used for presenting rendered graphics to the user.
 	 */
 	VkSurfaceKHR surface = nullptr;
 
-	/** Collection of images that are rendered to a Vulkan surface */
+	/**
+	 * The swapchain; A collection of images that are rendered to a Vulkan
+	 * surface
+	 */
 	VkSwapchainKHR swapchain = nullptr;
 
+	/** Pixel format of the swapchain */
 	VkFormat image_format = VK_FORMAT_UNDEFINED;
 
-	/**
-	 * In Vulkan images are not directly accesible by pipeline shaders for
-	 * reading or writing to. Instead, images must be accessed through image
-	 * view objects. An image view object contains data on how to access the
-	 * image object's data, specifying things such as the format and dimensions,
-	 * as well as how to handle multi-planar images, cube maps, or array
-	 * texture.
-	 */
-	std::vector<VkImage> swapchain_images = std::vector<VkImage>();
-	std::vector<VkImageView> swapchain_image_views = std::vector<VkImageView>();
+	/** Index to the queue family graphics commands are submitted to */
+	int graphics_queue_index = -1;
 
 	/**
-	 * Defines the collection of attachments and subpasses that define the
-	 * sequence of rendering operations
+	 * Arrays for swap chain images and swap chain image views. In Vulkan,
+	 * images are not directly accesible by pipeline shaders for reading or
+	 * writing to. Instead, images must be accessed through image view objects.
+	 * An image view object contains data on how to access the image object's
+	 * data, specifying stuff like the format and dimensions, as well as how to
+	 * handle multi-planar images, cube maps, or array texture.
+	 */
+	std::vector<VkImageView> swapchain_image_views = std::vector<VkImageView>();
+	std::vector<VkImage> swapchain_images = std::vector<VkImage>();
+
+	/**
+	 * Array of framebuffers for each swapchain image view. A Vulkan framebuffer
+	 * is a handle to a collection of attachments that define a rendering target
+	 * for a render pass object
+	 */
+	std::vector<VkFramebuffer> framebuffers;
+
+	/**
+	 * The render pass description. Defines the collection of attachments and
+	 * subpasses that make up a render pass.
 	 */
 	VkRenderPass render_pass = nullptr;
 
@@ -88,17 +102,6 @@ struct Application
 
 	/** Manages memory for the command buffer */
 	VkCommandPool command_pool;
-
-	/**
-	 * Array of framebuffers to be written into by a Vulkan render pass. A
-	 * Vulkan framebuffer is a handle to a collection of attachments that define
-	 * a rendering target for a render pass object
-	 */
-	std::vector<VkFramebuffer> framebuffers;
-
-	/** Attributes for the graphics queue family*/
-	VkQueue graphics_queue = nullptr;
-	uint32_t graphics_queue_family_index = 0;
 
 	/**
 	 * Synchronizes access to the graphics queue for rendering images and

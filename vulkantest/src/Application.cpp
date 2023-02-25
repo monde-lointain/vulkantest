@@ -139,7 +139,7 @@ void Application::render()
 	submit_info.commandBufferCount = 1;
 	submit_info.pCommandBuffers = &main_command_buffer;
 
-	result = vkQueueSubmit(graphics_queue, 1, &submit_info, render_fence);
+	result = vkQueueSubmit(queue, 1, &submit_info, render_fence);
 	check_vk_result(result);
 
 	// Present the image to the swap chain
@@ -155,7 +155,7 @@ void Application::render()
 
 	present_info.pImageIndices = &swapchain_image_index;
 
-	result = vkQueuePresentKHR(graphics_queue, &present_info);
+	result = vkQueuePresentKHR(queue, &present_info);
 	check_vk_result(result);
 }
 
@@ -250,13 +250,13 @@ void Application::init_vulkan()
 	// Create a Vulkan instance and debug messenger
 	vkb::InstanceBuilder builder;
 	builder.set_app_name("Vulkan Renderer");
+	builder.require_api_version(1, 1, 0);
 	if (VALIDATION_LAYERS_ON)
 	{
 		builder.request_validation_layers(true); // Enables "VK_LAYER_KHRONOS_validation"
 		builder.enable_layer("VK_LAYER_LUNARG_api_dump");
+		builder.use_default_debug_messenger();
 	}
-	builder.require_api_version(1, 1, 0);
-	builder.use_default_debug_messenger();
 	const vkb::Instance vkb_inst = builder.build().value();
 
 	instance = vkb_inst.instance;
@@ -280,8 +280,8 @@ void Application::init_vulkan()
 	device = vkb_device.device;
 
 	// Get the graphics queue attributes
-	graphics_queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
-	graphics_queue_family_index = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
+	queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
+	graphics_queue_index = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
 }
 
 void Application::init_swapchain()
@@ -380,7 +380,7 @@ void Application::init_commands()
 	// Create a Vulkan command pool
 	const VkCommandPoolCreateInfo command_pool_create_info =
 		vkinit::command_pool_create_info(
-			graphics_queue_family_index,
+			graphics_queue_index,
 			VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
 		);
 
