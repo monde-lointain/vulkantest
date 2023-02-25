@@ -31,6 +31,7 @@ void Application::update()
 {
     SDL_Event event;
 
+    // Handling core SDL events (moving the mouse, closing the window, etc.)
     while (SDL_PollEvent(&event))
     {
         // Closing the window
@@ -96,12 +97,12 @@ void Application::render()
     };
     VK_CHECK(vkBeginCommandBuffer(main_command_buffer, &cmd_buf_begin_info));
 
-    // Set the draw color for clearing the screen
+    // Set draw color for clearing the screen
     VkClearValue clear_value;
     float flash = fabsf(sinf((float)current_frame / 120.f));
     clear_value.color = { { flash, flash, flash, 1.0f } };
 
-    // Create a render pass
+    // Begin a render pass
     const VkRenderPassBeginInfo render_pass_begin_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext = nullptr,
@@ -117,11 +118,11 @@ void Application::render()
         VK_SUBPASS_CONTENTS_INLINE
     );
 
-    // Finalize the render stage commands
+    // Finalize render stage commands
     vkCmdEndRenderPass(main_command_buffer);
     VK_CHECK(vkEndCommandBuffer(main_command_buffer));
 
-    // Submit the command buffer to the graphics queue
+    // Submit command buffer to the graphics queue
     const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     const VkSubmitInfo submit_info = {
@@ -137,7 +138,7 @@ void Application::render()
     };
     VK_CHECK(vkQueueSubmit(queue, 1, &submit_info, render_fence));
 
-    // Present the image to the swap chain
+    // Present image to the swap chain
     const VkPresentInfoKHR present_info = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .pNext = nullptr,
@@ -373,8 +374,7 @@ VkShaderModule Application::load_shader_module(const char* filename) const
     if (!file.is_open())
     {
         std::string err("Failed to open file: ");
-        err += filename;
-        throw std::runtime_error(err);
+        throw std::runtime_error(err + filename);
     }
 
     // Get the file size using the current position of the cursor
@@ -468,30 +468,23 @@ void Application::init_sync_objects()
 
 void Application::init_pipelines()
 {
-    // Load the shaders into shader modules
+    // Set up the shaders
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
+    VkPipelineShaderStageCreateInfo stage;
+    VkShaderModule module;
 
-    VkShaderModule triangle_frag_shader =
-        load_shader_module("shaders/spirv/trifrag.spv");
-    shader_stages.push_back(
-        vkinit::shader_stage_create_info(
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            triangle_frag_shader
-        )
-    );
+    // Vertex stage
+    module = load_shader_module("shaders/spirv/trivert.spv");
+    stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, module);
+    shader_stages.push_back(stage);
 
-    VkShaderModule triangle_vert_shader =
-        load_shader_module("shaders/spirv/trivert.spv");
-    shader_stages.push_back(
-        vkinit::shader_stage_create_info(
-            VK_SHADER_STAGE_VERTEX_BIT,
-            triangle_vert_shader
-        )
-    );
+    // Fragment stage
+    module = load_shader_module("shaders/spirv/trifrag.spv");
+    stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, module);
+    shader_stages.push_back(stage);
 
     // Create a pipeline layout
-    const VkPipelineLayoutCreateInfo layout_info =
-        vkinit::pipeline_layout_create_info();
+    const VkPipelineLayoutCreateInfo layout_info = vkinit::pipeline_layout_create_info();
     VK_CHECK(vkCreatePipelineLayout(
         device, 
         &layout_info, 
@@ -504,10 +497,11 @@ void Application::init_pipelines()
         .shader_stages = shader_stages,
         .vertex_input = vkinit::vertex_input_state_create_info(),
         .input_assembly = vkinit::input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST),
-        .viewport = { 0.0f, 0.0f,
-                      (float)window_extent.width, (float)window_extent.height, 
-                      0.0f, 1.0f },
-        .scissor = { { 0, 0 }, window_extent },
+        .viewport = { .x = 0.0f, .y = 0.0f,
+                      .width = (float)window_extent.width,
+                      .height = (float)window_extent.height,
+                      .minDepth = 0.0f, .maxDepth = 1.0f },
+        .scissor = { .offset = { 0, 0 }, .extent = window_extent },
         .raster = vkinit::rasterization_state_create_info(VK_POLYGON_MODE_FILL),
         .blend_attachment = vkinit::color_blend_attachment_state(),
         .multisample = vkinit::multisample_state_create_info(),
