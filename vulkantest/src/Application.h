@@ -7,112 +7,129 @@ struct SDL_Window;
 
 struct Application
 {
-	void initialize();
-	void run();
-	void destroy() const;
+    void initialize();
 
-	void setup();
-	void input();
-	void update();
-	void render();
+    void run();
 
-	SDL_Window* window = nullptr;
-	VkExtent2D window_extent = { 1280, 720 };
-	const char* window_name = "Vulkan Renderer";
+    void destroy() const;
 
-	int current_frame = 0;
-	float target_seconds_per_frame = 0.0f;
-	bool running = false;
+    void setup();
 
-	void init_vulkan();
-	void init_swapchain();
-	void init_default_renderpass();
-	void init_framebuffers();
-	void init_commands();
-	void init_sync_objects();
-	//void init_pipelines();
-	//void init_scene();
-	//void init_descriptors();
+    void input();
 
-	/** The Vulkan instance. Used to access Vulkan drivers. */
-	VkInstance instance = nullptr;
+    void update();
 
-	/**
-	 * The Vulkan debug message handler. Passes along debug messages to a
-	 * designated debug callback function.
-	 */
-	VkDebugUtilsMessengerEXT debug_messenger = nullptr;
+    void render();
 
-	/** The Vulkan physical device. Represents an actual GPU on the system. */
-	VkPhysicalDevice gpu = nullptr;
+    SDL_Window* window = nullptr;
+    VkExtent2D window_extent = { 1280, 720 };
+    const char* window_name = "Vulkan Renderer";
 
-	/**
-	 * The Vulkan device. Used for allocating resources and executing commands
-	 * on the physical device.
-	 */
-	VkDevice device = nullptr;
+    int current_frame = 0;
+    float target_seconds_per_frame = 0.0f;
+    bool running = false;
 
-	/** The Vulkan device queue */
-	VkQueue queue = nullptr;
+    void init_instance();
 
-	/**
-	 * The Vulkan surface. Represents a platform-specific surface/window that is
-	 * used for presenting rendered graphics to the user.
-	 */
-	VkSurfaceKHR surface = nullptr;
+    void init_swapchain();
 
-	/**
-	 * The swapchain; A collection of images that are rendered to a Vulkan
-	 * surface
-	 */
-	VkSwapchainKHR swapchain = nullptr;
+    void init_default_renderpass();
 
-	/** Pixel format of the swapchain */
-	VkFormat image_format = VK_FORMAT_UNDEFINED;
+    void init_framebuffers();
 
-	/** Index to the queue family graphics commands are submitted to */
-	int graphics_queue_index = -1;
+    bool load_shader_module(
+        const char *filename, 
+        VkShaderModule &out_shader_module
+    ) const;
 
-	/**
-	 * Arrays for swap chain images and swap chain image views. In Vulkan,
-	 * images are not directly accesible by pipeline shaders for reading or
-	 * writing to. Instead, images must be accessed through image view objects.
-	 * An image view object contains data on how to access the image object's
-	 * data, specifying stuff like the format and dimensions, as well as how to
-	 * handle multi-planar images, cube maps, or array texture.
-	 */
-	std::vector<VkImageView> swapchain_image_views = std::vector<VkImageView>();
-	std::vector<VkImage> swapchain_images = std::vector<VkImage>();
+    void init_commands();
 
-	/**
-	 * Array of framebuffers for each swapchain image view. A Vulkan framebuffer
-	 * is a handle to a collection of attachments that define a rendering target
-	 * for a render pass object
-	 */
-	std::vector<VkFramebuffer> framebuffers;
+    void init_sync_objects();
 
-	/**
-	 * The render pass description. Defines the collection of attachments and
-	 * subpasses that make up a render pass.
-	 */
-	VkRenderPass render_pass = nullptr;
+    void init_pipelines();
 
-	/** The main buffer for writing commands into */
-	VkCommandBuffer main_command_buffer;
+    //void init_scene();
 
-	/** Manages memory for the command buffer */
-	VkCommandPool command_pool;
+    //void init_descriptors();
 
-	/**
-	 * Synchronizes access to the graphics queue for rendering images and
-	 * presenting them to the screen
-	 */
-	VkSemaphore render_semaphore = nullptr;
-	VkSemaphore present_semaphore = nullptr;
+    /** The Vulkan instance. Used to access Vulkan drivers. */
+    VkInstance instance = nullptr;
 
-	/**
-	 * Synchronizes the CPU and the GPU to wait until the GPU has finished
-	 * rendering
-	 */
-	VkFence render_fence = nullptr;
+    /**
+     * The Vulkan debug message handler. Passes along debug messages to a
+     * designated debug callback function.
+     */
+    VkDebugUtilsMessengerEXT debug_messenger = nullptr;
+
+    /** The Vulkan physical device. Represents an actual GPU on the system. */
+    VkPhysicalDevice gpu = nullptr;
+
+    /**
+     * The Vulkan device. Used for allocating resources and executing commands
+     * on the physical device.
+     */
+    VkDevice device = nullptr;
+
+    /** The Vulkan device queue. */
+    VkQueue queue = nullptr;
+
+    /**
+     * The Vulkan surface. Represents a platform-specific surface/window used
+     * for displaying rendered graphics.
+     */
+    VkSurfaceKHR surface = nullptr;
+
+    /**
+     * A collection of images that are rendered to a Vulkan surface.
+     */
+    VkSwapchainKHR swapchain = nullptr;
+
+    /** Pixel format of the swapchain. */
+    VkFormat image_format = VK_FORMAT_UNDEFINED;
+
+    /** Index to the queue family graphics commands are submitted to. */
+    int graphics_queue_index = -1;
+
+    /**
+     * Arrays for swap chain images and swap chain image views. In Vulkan,
+     * images are not directly accesible by pipeline shaders for reading or
+     * writing to. Instead, images must be accessed through image view objects.
+     * An image view object contains data on how to access the image's data,
+     * specifying things like the image format and dimensions, as well as how to
+     * handle multi-planar images, cube maps, or array texture.
+     */
+    std::vector<VkImageView> swapchain_image_views = std::vector<VkImageView>();
+    std::vector<VkImage> swapchain_images = std::vector<VkImage>();
+
+    /**
+     * Array of framebuffers for each swapchain image view. A Vulkan framebuffer
+     * is a handle to a collection of attachments that define a rendering target
+     * for a render pass object.
+     */
+    std::vector<VkFramebuffer> framebuffers;
+
+    /**
+     * The render pass description. Defines the collection of attachments and
+     * subpasses that make up a render pass.
+     */
+    VkRenderPass render_pass = nullptr;
+
+    /** The main buffer for writing commands into. */
+    VkCommandBuffer main_command_buffer;
+
+    /** Manages memory for the command buffer. */
+    VkCommandPool command_pool;
+
+    /**
+     * Synchronizes access to the graphics queue for rendering images and
+     * presenting them to the screen.
+     */
+    VkSemaphore render_semaphore = nullptr;
+    VkSemaphore present_semaphore = nullptr;
+
+    /**
+     * Synchronizes the CPU and the GPU to wait until the GPU has finished
+     * rendering.
+     */
+    VkFence render_fence = nullptr;
 };
