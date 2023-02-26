@@ -99,8 +99,8 @@ void Application::render()
 
     // Set draw color for clearing the screen
     VkClearValue clear_value;
-    float flash = fabsf(sinf((float)current_frame / 120.f));
-    clear_value.color = { { flash, flash, flash, 1.0f } };
+    //float flash = fabsf(sinf((float)current_frame / 120.f));
+    clear_value.color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
 
     // Begin a render pass
     const VkRenderPassBeginInfo render_pass_begin_info = {
@@ -117,6 +117,14 @@ void Application::render()
         &render_pass_begin_info,
         VK_SUBPASS_CONTENTS_INLINE
     );
+
+    // Draw a triangle to the screen
+	vkCmdBindPipeline(
+		main_command_buffer, 
+        VK_PIPELINE_BIND_POINT_GRAPHICS, 
+        pipeline
+    );
+    vkCmdDraw(main_command_buffer, 3, 1, 0, 0);
 
     // Finalize render stage commands
     vkCmdEndRenderPass(main_command_buffer);

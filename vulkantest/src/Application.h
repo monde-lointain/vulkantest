@@ -22,7 +22,7 @@ struct Application
     void render();
 
     SDL_Window* window = nullptr;
-    VkExtent2D window_extent = { 1280, 720 };
+    VkExtent2D window_extent = { 800, 600 };
     const char* window_name = "Vulkan Renderer";
 
     int current_frame = 0;

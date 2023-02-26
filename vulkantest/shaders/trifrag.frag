@@ -1,9 +1,7 @@
 #version 460
-
-layout (location = 0) out vec4 out_fcolor;
-
+layout (location = 0) in vec3 color;
+layout (location = 0) out vec4 fcolor;
 void main()
 {
-    // Red
-    out_fcolor = vec4(1.0f, 0.0f, 0.0f, 1.0f);
+    fcolor = vec4(color, 1.0f);
 }
