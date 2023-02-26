@@ -80,13 +80,13 @@
     <GenerateManifest />
     <EnableMicrosoftCodeAnalysis>false</EnableMicrosoftCodeAnalysis>
     <EnableClangTidyCodeAnalysis>true</EnableClangTidyCodeAnalysis>
-    <ClangTidyChecks>*,-abseil-*,-altera-*,-android-*,-boost-*,-darwin-*,-fuchsia-*,-google-*,-linuxkernel-*,-llvm-*,-llvmlibc-*,-objc-*,-zircon-*,-bugprone-easily-swappable-parameters,-cppcoreguidelines-avoid-magic-numbers,-cppcoreguidelines-init-variables,-cppcoreguidelines-owning-memory,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-cppcoreguidelines-pro-type-union-access,-hicpp-signed-bitwise,-hicpp-uppercase-literal-suffix,-hicpp-use-auto,-misc-non-private-member-variables-in-classes,-modernize-use-auto,-modernize-use-trailing-return-type,-readability-identifier-length,-readability-implicit-bool-conversion,-readability-isolate-declaration,-readability-magic-numbers,-readability-uppercase-literal-suffix</ClangTidyChecks>
+    <ClangTidyChecks>*,-abseil-*,-altera-*,-android-*,-boost-*,-darwin-*,-fuchsia-*,-google-*,-linuxkernel-*,-llvm-*,-llvmlibc-*,-objc-*,-zircon-*,-bugprone-easily-swappable-parameters,-cppcoreguidelines-avoid-magic-numbers,-cppcoreguidelines-init-variables,-cppcoreguidelines-owning-memory,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-cppcoreguidelines-pro-type-reinterpret-cast,-cppcoreguidelines-pro-type-union-access,-hicpp-signed-bitwise,-hicpp-uppercase-literal-suffix,-hicpp-use-auto,-misc-non-private-member-variables-in-classes,-modernize-use-auto,-modernize-use-trailing-return-type,-readability-identifier-length,-readability-implicit-bool-conversion,-readability-isolate-declaration,-readability-magic-numbers,-readability-uppercase-literal-suffix</ClangTidyChecks>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <GenerateManifest />
     <EnableMicrosoftCodeAnalysis>false</EnableMicrosoftCodeAnalysis>
     <EnableClangTidyCodeAnalysis>true</EnableClangTidyCodeAnalysis>
-    <ClangTidyChecks>*,-abseil-*,-altera-*,-android-*,-boost-*,-darwin-*,-fuchsia-*,-google-*,-linuxkernel-*,-llvm-*,-llvmlibc-*,-objc-*,-zircon-*,-bugprone-easily-swappable-parameters,-cppcoreguidelines-avoid-magic-numbers,-cppcoreguidelines-init-variables,-cppcoreguidelines-owning-memory,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-cppcoreguidelines-pro-type-union-access,-hicpp-signed-bitwise,-hicpp-uppercase-literal-suffix,-hicpp-use-auto,-misc-non-private-member-variables-in-classes,-modernize-use-auto,-modernize-use-trailing-return-type,-readability-identifier-length,-readability-implicit-bool-conversion,-readability-isolate-declaration,-readability-magic-numbers,-readability-uppercase-literal-suffix</ClangTidyChecks>
+    <ClangTidyChecks>*,-abseil-*,-altera-*,-android-*,-boost-*,-darwin-*,-fuchsia-*,-google-*,-linuxkernel-*,-llvm-*,-llvmlibc-*,-objc-*,-zircon-*,-bugprone-easily-swappable-parameters,-cppcoreguidelines-avoid-magic-numbers,-cppcoreguidelines-init-variables,-cppcoreguidelines-owning-memory,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-cppcoreguidelines-pro-type-reinterpret-cast,-cppcoreguidelines-pro-type-union-access,-hicpp-signed-bitwise,-hicpp-uppercase-literal-suffix,-hicpp-use-auto,-misc-non-private-member-variables-in-classes,-modernize-use-auto,-modernize-use-trailing-return-type,-readability-identifier-length,-readability-implicit-bool-conversion,-readability-isolate-declaration,-readability-magic-numbers,-readability-uppercase-literal-suffix</ClangTidyChecks>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -249,16 +249,20 @@
     <ClCompile Include="libs\imgui\imgui_widgets.cpp" />
     <ClCompile Include="libs\tiny_obj\tiny_obj_loader.cc" />
     <ClCompile Include="libs\vk-bootstrap\VkBootstrap.cpp" />
-    <ClCompile Include="src\VulkanRenderer\PipelineBuilder.cpp" />
     <ClCompile Include="src\Application.cpp" />
     <ClCompile Include="src\main.cpp" />
-    <ClCompile Include="src\VulkanRenderer\vktypes.h" />
+    <ClCompile Include="src\Model\Model.cpp" />
+    <ClCompile Include="src\Model\Vertex.cpp" />
+    <ClCompile Include="src\VulkanRenderer\PipelineBuilder.cpp" />
     <ClCompile Include="src\VulkanRenderer\vkinit.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\VulkanRenderer\PipelineBuilder.h" />
     <ClInclude Include="src\Application.h" />
+    <ClInclude Include="src\Model\Model.h" />
+    <ClInclude Include="src\Model\Vertex.h" />
+    <ClInclude Include="src\VulkanRenderer\PipelineBuilder.h" />
     <ClInclude Include="src\VulkanRenderer\vkinit.h" />
+    <ClInclude Include="src\VulkanRenderer\vktypes.h" />
     <ClInclude Include="src\VulkanRenderer\vkutils.h" />
   </ItemGroup>
   <ItemGroup>

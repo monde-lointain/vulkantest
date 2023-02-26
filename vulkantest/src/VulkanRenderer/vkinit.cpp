@@ -48,13 +48,15 @@ vkinit::shader_stage_create_info(
 }
 
 VkPipelineVertexInputStateCreateInfo
-vkinit::vertex_input_state_create_info()
+vkinit::vertex_input_state_create_info(VertexInputDescription& description)
 {
-    VkPipelineVertexInputStateCreateInfo vertex_input = {
+    const VkPipelineVertexInputStateCreateInfo vertex_input = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .pNext = nullptr,
-        .vertexBindingDescriptionCount = 0,
-        .vertexAttributeDescriptionCount = 0
+        .vertexBindingDescriptionCount = (uint32_t)description.bindings.size(),
+        .pVertexBindingDescriptions = description.bindings.data(),
+        .vertexAttributeDescriptionCount = (uint32_t)description.attributes.size(),
+        .pVertexAttributeDescriptions = description.attributes.data()
     };
     return vertex_input;
 }
@@ -133,4 +135,21 @@ vkinit::pipeline_layout_create_info()
         .pPushConstantRanges = nullptr
     };
     return layout_info;
+}
+
+VkVertexInputAttributeDescription
+vkinit::vertex_input_attribute_description(
+    uint32_t location,
+    uint32_t binding,
+    VkFormat format,
+    uint32_t offset
+)
+{
+    const VkVertexInputAttributeDescription vertex_input_attribute = {
+        .location = location,
+        .binding = binding,
+        .format = format,
+        .offset = offset
+    };
+    return vertex_input_attribute;
 }

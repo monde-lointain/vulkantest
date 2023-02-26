@@ -4,12 +4,15 @@
 
 #include <vulkan/vulkan_core.h>
 
+#include "Model/Model.h"
+
 enum ERenderMode
 {
     RAINBOW,
     SOLID,
 };
 
+struct PipelineBuilder;
 struct SDL_Window;
 
 struct Application
@@ -30,6 +33,7 @@ struct Application
 
     SDL_Window* window = nullptr;
     VkExtent2D window_extent = { 800, 600 };
+    VkRect2D scissor = { { 0, 0 }, window_extent };
     const char* window_name = "Vulkan Renderer";
 
     int current_frame = 0;
@@ -39,6 +43,8 @@ struct Application
     ERenderMode render_mode = SOLID;
 
     void init_instance();
+
+    void init_allocator();
 
     void init_swapchain();
 
@@ -54,11 +60,19 @@ struct Application
 
     void init_pipelines();
 
+    void pipe_cleanup(
+        PipelineBuilder& builder, 
+        std::vector<VkPipelineShaderStageCreateInfo>& shader_stages
+    ) const;
+
     //void init_scene();
 
     //void init_descriptors();
 
     void destroy_vulkan_resources();
+
+    /** The VMA allocator. Manages memory buffers */
+    VmaAllocator allocator = nullptr;
 
     /** The Vulkan instance. Used to access Vulkan drivers. */
     VkInstance instance = nullptr;
@@ -99,8 +113,8 @@ struct Application
     /**
      * Arrays for swap chain images and swap chain image views. In Vulkan,
      * images are not directly accesible by pipeline shaders for reading or
-     * writing to. Instead, images must be accessed through image view objects.
-     * An image view object contains data on how to access the image's data,
+     * writing to and must be accessed through image view objects instead. An
+     * image view object contains data on how to access the image's data,
      * specifying things like the image format and dimensions, as well as how to
      * handle multi-planar images, cube maps, or array texture.
      */
@@ -123,11 +137,12 @@ struct Application
     /** Graphics pipelines for triangle filling */
     VkPipeline rainbow_pipe = nullptr;
     VkPipeline solid_pipe = nullptr;
+    VkPipeline model_pipe = nullptr;
 
     /** Pipeline layout for resources. */
     VkPipelineLayout pipeline_layout = nullptr;
 
-    /** Pipeline layout for resources. */
+    /** Contains render commands for vertex targets. */
     VkCommandBuffer main_command_buffer;
 
     /** Manages memory for the command buffer. */
@@ -145,4 +160,12 @@ struct Application
      * rendering.
      */
     VkFence render_fence = nullptr;
+
+    void load_models();
+
+    void upload_model(Model& model);
+
+    Model model = {};
+
+    std::vector<Model> models;
 };

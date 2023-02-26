@@ -9,6 +9,11 @@
 #include <SDL2/SDL_vulkan.h>
 #include <vk-bootstrap/VkBootstrap.h>
 
+#pragma warning(push, 0)
+#define VMA_IMPLEMENTATION
+#include <vma/vk_mem_alloc.h>
+#pragma warning(pop)
+
 #include "VulkanRenderer/PipelineBuilder.h"
 #include "VulkanRenderer/vkinit.h"
 #include "VulkanRenderer/vkutils.h"
@@ -95,8 +100,8 @@ void Application::render()
         &swapchain_image_index)
     );
 
-    // Clear the current command buffer
-    VK_CHECK(vkResetCommandBuffer(main_command_buffer, 0));
+    // Clear all command buffers
+    VK_CHECK(vkResetCommandPool(device, command_pool, 0));
 
     // Start recording commands into the command buffer
     const VkCommandBufferBeginInfo cmd_buf_begin_info = {
@@ -118,7 +123,7 @@ void Application::render()
         .pNext = nullptr,
         .renderPass = render_pass,
         .framebuffer = framebuffers[swapchain_image_index],
-        .renderArea = { .offset = { 0, 0 }, .extent = window_extent },
+        .renderArea = scissor,
         .clearValueCount = 1,
         .pClearValues = &clear_value
     };
@@ -128,27 +133,37 @@ void Application::render()
         VK_SUBPASS_CONTENTS_INLINE
     );
 
-    // Choose a pipeline based on the render mode
-    VkPipeline pipe = nullptr;
-    switch (render_mode)
-    {
-        case SOLID:
-            pipe = solid_pipe;
-            break;
-        case RAINBOW:
-            pipe = rainbow_pipe;
-            break;
-    }
+    //// Choose a pipeline based on the render mode
+    //VkPipeline pipe = nullptr;
+    //switch (render_mode)
+    //{
+    //    case SOLID:
+    //        pipe = solid_pipe;
+    //        break;
+    //    case RAINBOW:
+    //        pipe = rainbow_pipe;
+    //        break;
+    //}
 
     // Bind pipeline to the command buffer
     vkCmdBindPipeline(
         main_command_buffer, 
         VK_PIPELINE_BIND_POINT_GRAPHICS, 
-        pipe
+        model_pipe
     );
 
-    // Draw a triangle to the screen
-    vkCmdDraw(main_command_buffer, 3, 1, 0, 0);
+    // Bind vertex buffer to the command buffer with an offset of zero
+    const VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(
+        main_command_buffer, 
+        0, 
+        1, 
+        &model.vertex_buffer.buffer, 
+        &offset
+    );
+
+    // Draw the model
+    vkCmdDraw(main_command_buffer, (uint32_t)model.vertices.size(), 1, 0, 0);
 
     // Finalize render stage commands
     vkCmdEndRenderPass(main_command_buffer);
@@ -218,6 +233,7 @@ void Application::initialize()
 
     // Initialize the Vulkan renderer
     init_instance();
+    init_allocator();
     init_swapchain();
     init_default_renderpass();
     init_framebuffers();
@@ -225,6 +241,9 @@ void Application::initialize()
     //init_descriptors();
     init_sync_objects();
     init_pipelines();
+
+    // Load models into the scene
+    load_models();
 
     // Everything is successfully initialized and the application is running
     running = true;
@@ -255,11 +274,23 @@ void Application::destroy()
 
 void Application::destroy_vulkan_resources()
 {
-    // Wait until the GPU is completely idle to free things
+    // Wait until the GPU is completely idle
     vkDeviceWaitIdle(device);
 
+    for (const Model& model_ : models)
+    {
+        vmaDestroyBuffer(
+            allocator, 
+            model_.vertex_buffer.buffer,
+            model_.vertex_buffer.allocation
+        );
+    }
     vkDestroySemaphore(device, present_semaphore, nullptr);
     vkDestroySemaphore(device, render_semaphore, nullptr);
+    if (model_pipe)
+    {
+        vkDestroyPipeline(device, model_pipe, nullptr);
+    }
     if (rainbow_pipe)
     {
         vkDestroyPipeline(device, rainbow_pipe, nullptr);
@@ -293,6 +324,10 @@ void Application::destroy_vulkan_resources()
         vkDestroyFramebuffer(device, framebuffers[i], nullptr);
         vkDestroyImageView(device, swapchain_image_views[i], nullptr);
     }
+    if (allocator)
+    {
+        vmaDestroyAllocator(allocator);
+    }
     if (surface)
     {
         vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -314,7 +349,7 @@ void Application::init_instance()
     if (VALIDATION_LAYERS_ON)
     {
         builder.request_validation_layers(true); // Enables "VK_LAYER_KHRONOS_validation"
-        builder.enable_layer("VK_LAYER_LUNARG_api_dump");
+        /*builder.enable_layer("VK_LAYER_LUNARG_api_dump");*/
         builder.use_default_debug_messenger();
     }
     const vkb::Instance vkb_inst = builder.build().value();
@@ -327,7 +362,7 @@ void Application::init_instance()
 
     // Select a GPU from the available physical devices
     vkb::PhysicalDeviceSelector selector(vkb_inst);
-    selector.set_minimum_version(1, 1);
+    selector.set_minimum_version(1, 3);
     selector.set_surface(surface);
     const vkb::PhysicalDevice vkb_gpu = selector.select().value();
 
@@ -339,9 +374,19 @@ void Application::init_instance()
 
     device = vkb_device.device;
 
-    // Get the graphics queue attributes
+    // Get graphics queue attributes
     queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
     graphics_queue_index = (int)vkb_device.get_queue_index(vkb::QueueType::graphics).value();
+}
+
+void Application::init_allocator()
+{
+    const VmaAllocatorCreateInfo allocator_create_info = {
+        .physicalDevice = gpu, 
+        .device = device, 
+        .instance = instance
+    };
+    VK_CHECK(vmaCreateAllocator(&allocator_create_info, &allocator));
 }
 
 void Application::init_swapchain()
@@ -350,6 +395,7 @@ void Application::init_swapchain()
     vkb::SwapchainBuilder builder(gpu, device, surface);
     builder.use_default_format_selection();
     builder.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR); // use vsync
+    builder.set_desired_min_image_count(vkb::SwapchainBuilder::TRIPLE_BUFFERING);
     builder.set_desired_extent(window_extent.width, window_extent.height);
     vkb::Swapchain vkbSwapchain = builder.build().value();
 
@@ -361,8 +407,8 @@ void Application::init_swapchain()
 
 void Application::init_default_renderpass()
 {
-    // Define the attachments to use for the render pass. In this case, we'll
-    // use just one color attachment
+	// Define attachments to use for the render pass. We'll use just one color
+	// attachment for now
     const VkAttachmentDescription color_attachment = {
         .format = image_format,
         .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -380,15 +426,15 @@ void Application::init_default_renderpass()
         .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
     };
 
-    // Define the attachments for the render subpasses. We'll just use one for
-    // now, which will use the color attachment above
+    // Define attachments for the render subpasses. Only one render pass for
+	// now, which will use the color attachment above
     const VkSubpassDescription subpass = {
         .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
         .colorAttachmentCount = 1,
         .pColorAttachments = &color_attachment_ref
     };
 
-    // Create the render pass
+    // Create render pass
     const VkRenderPassCreateInfo render_pass_create_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
         .attachmentCount = 1,
@@ -406,8 +452,8 @@ void Application::init_default_renderpass()
 
 void Application::init_framebuffers()
 {
-    // Create the framebuffers for the swapchain images. This will connect the
-    // render-pass to the images for rendering
+	// Create framebuffers for the swapchain images. This will connect the
+	// render pass to the images for rendering
     VkFramebufferCreateInfo fb_create_info = {
         .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -437,8 +483,8 @@ void Application::init_framebuffers()
 
 VkShaderModule Application::load_shader_module(const char* filename) const
 {
-    // Open the binary file for reading, with the cursor at the end
-    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+    // Open binary file for reading and seek to the end
+    std::ifstream file(filename, std::ios::binary | std::ios::ate);
 
     if (!file.is_open())
     {
@@ -446,16 +492,14 @@ VkShaderModule Application::load_shader_module(const char* filename) const
         throw std::runtime_error(err + filename);
     }
 
-    // Get the file size using the current position of the cursor
+    // Use position of the cursor to determine file size
     const size_t file_size = (size_t)file.tellg();
 
-    // Allocate memory for the buffer based on the file size
+    // Allocate memory for buffer based on the file size
     std::vector<uint32_t> buffer(file_size / sizeof(uint32_t));
 
-    // Move the file cursor to the beginning
+    // Read file into the buffer
     file.seekg(0);
-
-    // Read the file into the buffer
     file.read(reinterpret_cast<char *>(buffer.data()), (int64_t)file_size);
 
     file.close();
@@ -484,8 +528,8 @@ void Application::init_commands()
     // Create a Vulkan command pool
     const VkCommandPoolCreateInfo command_pool_create_info =
         vkinit::command_pool_create_info(
-            graphics_queue_index,
-            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
+            graphics_queue_index, 
+            VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
         );
     VK_CHECK(vkCreateCommandPool(
         device, 
@@ -537,13 +581,14 @@ void Application::init_sync_objects()
 
 void Application::init_pipelines()
 {
-    // Set up the shaders for the solid triangle pipeline
+    // Set up shaders for pipeline
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
-    VkPipelineShaderStageCreateInfo stage;
     VkShaderModule module;
+    VkPipelineShaderStageCreateInfo stage;
 
+    // Load shaders for pipeline
     // Vertex stage
-    module = load_shader_module("shaders/spirv/tri_vert.spv");
+    module = load_shader_module("shaders/spirv/tri_mesh.spv");
     stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, module);
     shader_stages.push_back(stage);
 
@@ -552,7 +597,10 @@ void Application::init_pipelines()
     stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, module);
     shader_stages.push_back(stage);
 
-    // Create a pipeline layout
+    // Specify vertex input descriptors for pipeline
+    VertexInputDescription description = get_vertex_input_description();
+
+    // Create pipeline layout
     const VkPipelineLayoutCreateInfo layout_info = vkinit::pipeline_layout_create_info();
     VK_CHECK(vkCreatePipelineLayout(
         device, 
@@ -564,44 +612,93 @@ void Application::init_pipelines()
     // Fill out the pipeline builder
     PipelineBuilder builder = {
         .shader_stages = shader_stages,
-        .vertex_input = vkinit::vertex_input_state_create_info(),
+        .vertex_input = vkinit::vertex_input_state_create_info(description),
         .input_assembly = vkinit::input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST),
         .viewport = { .x = 0.0f, .y = 0.0f,
                       .width = (float)window_extent.width,
                       .height = (float)window_extent.height,
                       .minDepth = 0.0f, .maxDepth = 1.0f },
-        .scissor = { .offset = { 0, 0 }, .extent = window_extent },
+        .scissor = scissor,
         .raster = vkinit::rasterization_state_create_info(VK_POLYGON_MODE_FILL),
         .blend_attachment = vkinit::color_blend_attachment_state(),
         .multisample = vkinit::multisample_state_create_info(),
         .pipeline_layout = pipeline_layout
     };
 
-    // Build the solid color pipeline
-    solid_pipe = builder.build_pipeline(device, render_pass);
+    // Build the pipeline
+    builder.shader_stages = shader_stages;
+    model_pipe = builder.build_pipeline(device, render_pass);
 
-    // We don't need the shader modules anymore now the pipeline is built
+    // Cleanup pipeline resources
+    pipe_cleanup(builder, shader_stages);
+}
+
+void Application::load_models()
+{
+    // Allocate memory for the triangle vertices
+    model.vertices.resize(3);
+
+    // Define vertex attributes for the triangle
+    model.vertices[0].position = { -0.5f,  0.5f, 0.0f }; // bottom left
+    model.vertices[1].position = {  0.5f,  0.5f, 0.0f }; // bottom right
+    model.vertices[2].position = {  0.0f, -0.5f, 0.0f }; // top
+    model.vertices[0].color = { 1.0f, 0.0f, 0.0f };
+    model.vertices[1].color = { 0.0f, 1.0f, 0.0f };
+    model.vertices[2].color = { 0.0f, 0.0f, 1.0f };
+
+    upload_model(model);
+}
+
+void Application::upload_model(Model& model_)
+{
+    // Specify info about the vertex buffer to create
+    const VkBufferCreateInfo buffer_create_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .pNext = nullptr,
+        .size = model_.vertices.size() * sizeof(Vertex),
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+    };
+
+    // Set allocation properties for the buffer
+    const VmaAllocationCreateInfo alloc_create_info = {
+        .usage = VMA_MEMORY_USAGE_CPU_TO_GPU
+    };
+
+    // Allocate memory for the vertex buffer
+    VK_CHECK(vmaCreateBuffer(
+        allocator, 
+        &buffer_create_info,
+        &alloc_create_info,
+        &model_.vertex_buffer.buffer,
+        &model_.vertex_buffer.allocation,
+        nullptr)
+    );
+
+    // Map allocated memory to be accessible to the CPU
+    void* vertex_data;
+    vmaMapMemory(allocator, model_.vertex_buffer.allocation, &vertex_data);
+
+    // Copy the model vertex data to the allocated memory block
+    const size_t buf_sz = model_.vertices.size() * sizeof(Vertex);
+    memcpy(vertex_data, model_.vertices.data(), buf_sz);
+
+    // Unmap the memory to release it back to the allocator
+    vmaUnmapMemory(allocator, model_.vertex_buffer.allocation);
+
+    // Add model to models in scene
+    models.push_back(model_);
+}
+
+void Application::pipe_cleanup(
+    PipelineBuilder &builder,
+    std::vector<VkPipelineShaderStageCreateInfo> &shader_stages
+) const
+{
+    // Destroy shader modules
     vkDestroyShaderModule(device, builder.shader_stages[0].module, nullptr);
     vkDestroyShaderModule(device, builder.shader_stages[1].module, nullptr);
 
-    // Clear the shader stages arrays for the next pipeline
+    // Clear arrays
     builder.shader_stages.clear();
     shader_stages.clear();
-
-    // Load shaders for the rainbow pipeline
-    module = load_shader_module("shaders/spirv/rainbow_tri_vert.spv");
-    stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, module);
-    shader_stages.push_back(stage);
-
-    module = load_shader_module("shaders/spirv/rainbow_tri_frag.spv");
-    stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, module);
-    shader_stages.push_back(stage);
-
-    // Build the rainbow pipeline using the new shaders
-    builder.shader_stages = shader_stages;
-    rainbow_pipe = builder.build_pipeline(device, render_pass);
-
-    // Destroy the shaders for this pipeline now too
-    vkDestroyShaderModule(device, builder.shader_stages[0].module, nullptr);
-    vkDestroyShaderModule(device, builder.shader_stages[1].module, nullptr);
 }

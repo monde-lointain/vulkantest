@@ -26,8 +26,8 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass)
     };
 
     // Build a graphics pipeline
-    uint32_t num_stages = (uint32_t)shader_stages.size();
-    const VkGraphicsPipelineCreateInfo pipelineInfo = {
+    const uint32_t num_stages = (uint32_t)shader_stages.size();
+    const VkGraphicsPipelineCreateInfo pipeline_info = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext = nullptr,
         .stageCount = num_stages,
@@ -48,7 +48,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass)
         device, 
         VK_NULL_HANDLE, 
         1, 
-        &pipelineInfo, 
+        &pipeline_info,
         nullptr, 
         &pipeline
     );

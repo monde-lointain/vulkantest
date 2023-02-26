@@ -2,6 +2,8 @@
 
 #include <vulkan/vulkan_core.h>
 
+#include "../Model/Vertex.h"
+
 namespace vkinit
 {
     VkCommandPoolCreateInfo
@@ -24,7 +26,7 @@ namespace vkinit
     );
 
     VkPipelineVertexInputStateCreateInfo
-    vertex_input_state_create_info();
+    vertex_input_state_create_info(VertexInputDescription& description);
 
     VkPipelineInputAssemblyStateCreateInfo
     input_assembly_create_info(VkPrimitiveTopology topology);
@@ -40,4 +42,12 @@ namespace vkinit
 
     VkPipelineLayoutCreateInfo
     pipeline_layout_create_info();
+
+    VkVertexInputAttributeDescription
+    vertex_input_attribute_description(
+        uint32_t location, 
+        uint32_t binding, 
+        VkFormat format, 
+        uint32_t offset
+    );
 };	  // namespace vkinit

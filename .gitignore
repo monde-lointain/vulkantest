@@ -363,3 +363,4 @@ MigrationBackup/
 FodyWeavers.xsd
 /vulkantest/shaders/build.bat
 /vulkantest/compile_shaders.bat
+/vulkantest/src/test
