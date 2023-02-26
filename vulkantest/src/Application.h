@@ -2,9 +2,17 @@
 
 #include <vector>
 
+#include <glm/mat4x4.hpp>
+#include <glm/vec4.hpp>
 #include <vulkan/vulkan_core.h>
 
 #include "Model/Model.h"
+
+struct MeshPushConstants
+{
+    glm::vec4 data;
+    glm::mat4 modelviewprojection;
+};
 
 enum ERenderMode
 {
@@ -134,19 +142,17 @@ struct Application
      */
     VkRenderPass render_pass = nullptr;
 
-    /** Graphics pipelines for triangle filling */
-    VkPipeline rainbow_pipe = nullptr;
-    VkPipeline solid_pipe = nullptr;
-    VkPipeline model_pipe = nullptr;
+    /** Graphics pipeline for triangle filling */
+    VkPipeline pipeline = nullptr;
 
-    /** Pipeline layout for resources. */
+    /** Pipeline layouts for resources. */
     VkPipelineLayout pipeline_layout = nullptr;
 
     /** Contains render commands for vertex targets. */
-    VkCommandBuffer main_command_buffer;
+    VkCommandBuffer main_command_buffer = nullptr;
 
     /** Manages memory for the command buffer. */
-    VkCommandPool command_pool;
+    VkCommandPool command_pool = nullptr;
 
     /**
      * Synchronizes access to the graphics queue for rendering images and
@@ -163,9 +169,10 @@ struct Application
 
     void load_models();
 
-    void upload_model(Model& model);
+    void upload_model(Model *model);
 
-    Model model = {};
+	Model triangle = {};
+	Model *cube = nullptr;
 
-    std::vector<Model> models;
+	std::vector<Model *> models;
 };

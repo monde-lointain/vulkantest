@@ -257,17 +257,11 @@
     <ClCompile Include="src\VulkanRenderer\vkinit.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\Application.h" />
-    <ClInclude Include="src\Model\Model.h" />
-    <ClInclude Include="src\Model\Vertex.h" />
-    <ClInclude Include="src\VulkanRenderer\PipelineBuilder.h" />
-    <ClInclude Include="src\VulkanRenderer\vkinit.h" />
-    <ClInclude Include="src\VulkanRenderer\vktypes.h" />
-    <ClInclude Include="src\VulkanRenderer\vkutils.h" />
-  </ItemGroup>
-  <ItemGroup>
     <None Include="shaders\trifrag.glsl" />
     <None Include="shaders\trivert.glsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\Utils\Colors.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

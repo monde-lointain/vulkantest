@@ -5,6 +5,7 @@
 #include <string>
 #include <stdexcept>
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 #include <vk-bootstrap/VkBootstrap.h>
@@ -149,21 +150,46 @@ void Application::render()
     vkCmdBindPipeline(
         main_command_buffer, 
         VK_PIPELINE_BIND_POINT_GRAPHICS, 
-        model_pipe
+        pipeline
     );
 
-    // Bind vertex buffer to the command buffer with an offset of zero
-    const VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(
-        main_command_buffer, 
-        0, 
-        1, 
-        &model.vertex_buffer.buffer, 
-        &offset
-    );
+    for (Model* model : models)
+    {
+		// Bind vertex buffer to the command buffer with an offset of zero
+		const VkDeviceSize offset = 0;
+		vkCmdBindVertexBuffers(
+			main_command_buffer, 0, 1, &model->vertex_buffer.buffer, &offset);
 
-    // Draw the model
-    vkCmdDraw(main_command_buffer, (uint32_t)model.vertices.size(), 1, 0, 0);
+		// Create MVP matrix
+		glm::vec3 camera_translation(0.0f, 0.0f, -2.0f);
+		glm::mat4 view_matrix = glm::lookAt(
+			camera_translation, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::mat4 projection_matrix = glm::perspective(glm::radians(60.0f),
+			(float)window_extent.width / (float)window_extent.height, 0.1f,
+			1000.0f);
+		float rot = (float)current_frame * 0.2f;
+		glm::mat4 model_matrix = glm::rotate(
+			glm::mat4(1.0f), glm::radians(rot), glm::vec3(0.0f, 1.0f, 0.0f));
+		glm::mat4 modelviewprojection =
+			projection_matrix * view_matrix * model_matrix;
+
+		// Upload MVP matrix to GPU via push constants
+		MeshPushConstants push_constants = {
+			.modelviewprojection = modelviewprojection
+        };
+
+		vkCmdPushConstants(
+            main_command_buffer, 
+            pipeline_layout,
+			VK_SHADER_STAGE_VERTEX_BIT, 
+            0, 
+            sizeof(MeshPushConstants),
+			&push_constants
+        );
+
+        // Draw the model
+        vkCmdDraw(main_command_buffer, (uint32_t)model->vertices.size(), 1, 0, 0);
+    }
 
     // Finalize render stage commands
     vkCmdEndRenderPass(main_command_buffer);
@@ -277,27 +303,19 @@ void Application::destroy_vulkan_resources()
     // Wait until the GPU is completely idle
     vkDeviceWaitIdle(device);
 
-    for (const Model& model_ : models)
+    for (const Model* model : models)
     {
         vmaDestroyBuffer(
             allocator, 
-            model_.vertex_buffer.buffer,
-            model_.vertex_buffer.allocation
+            model->vertex_buffer.buffer,
+            model->vertex_buffer.allocation
         );
     }
     vkDestroySemaphore(device, present_semaphore, nullptr);
     vkDestroySemaphore(device, render_semaphore, nullptr);
-    if (model_pipe)
+    if (pipeline)
     {
-        vkDestroyPipeline(device, model_pipe, nullptr);
-    }
-    if (rainbow_pipe)
-    {
-        vkDestroyPipeline(device, rainbow_pipe, nullptr);
-    }
-    if (solid_pipe)
-    {
-        vkDestroyPipeline(device, solid_pipe, nullptr);
+        vkDestroyPipeline(device, pipeline, nullptr);
     }
     if (pipeline_layout)
     {
@@ -600,8 +618,19 @@ void Application::init_pipelines()
     // Specify vertex input descriptors for pipeline
     VertexInputDescription description = get_vertex_input_description();
 
+    // Fill pipeline layout struct
+    VkPipelineLayoutCreateInfo layout_info = vkinit::pipeline_layout_create_info();
+
+    // Specify model push constants
+    const VkPushConstantRange push_constant = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+        .offset = 0,
+        .size = sizeof(MeshPushConstants)
+    };
+    layout_info.pPushConstantRanges = &push_constant;
+    layout_info.pushConstantRangeCount = 1;
+
     // Create pipeline layout
-    const VkPipelineLayoutCreateInfo layout_info = vkinit::pipeline_layout_create_info();
     VK_CHECK(vkCreatePipelineLayout(
         device, 
         &layout_info, 
@@ -627,7 +656,7 @@ void Application::init_pipelines()
 
     // Build the pipeline
     builder.shader_stages = shader_stages;
-    model_pipe = builder.build_pipeline(device, render_pass);
+    pipeline = builder.build_pipeline(device, render_pass);
 
     // Cleanup pipeline resources
     pipe_cleanup(builder, shader_stages);
@@ -636,26 +665,28 @@ void Application::init_pipelines()
 void Application::load_models()
 {
     // Allocate memory for the triangle vertices
-    model.vertices.resize(3);
+    triangle.vertices.resize(3);
 
     // Define vertex attributes for the triangle
-    model.vertices[0].position = { -0.5f,  0.5f, 0.0f }; // bottom left
-    model.vertices[1].position = {  0.5f,  0.5f, 0.0f }; // bottom right
-    model.vertices[2].position = {  0.0f, -0.5f, 0.0f }; // top
-    model.vertices[0].color = { 1.0f, 0.0f, 0.0f };
-    model.vertices[1].color = { 0.0f, 1.0f, 0.0f };
-    model.vertices[2].color = { 0.0f, 0.0f, 1.0f };
+    triangle.vertices[0].position = { -0.5f,  0.5f, 0.0f }; // bottom left
+    triangle.vertices[1].position = {  0.5f,  0.5f, 0.0f }; // bottom right
+    triangle.vertices[2].position = {  0.0f, -0.5f, 0.0f }; // top
+    triangle.vertices[0].color = { 1.0f, 0.0f, 0.0f };
+    triangle.vertices[1].color = { 0.0f, 1.0f, 0.0f };
+    triangle.vertices[2].color = { 0.0f, 0.0f, 1.0f };
 
-    upload_model(model);
+    cube = create_model("assets/models/cube/cube.obj");
+
+    upload_model(cube);
 }
 
-void Application::upload_model(Model& model_)
+void Application::upload_model(Model* model)
 {
     // Specify info about the vertex buffer to create
     const VkBufferCreateInfo buffer_create_info = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
-        .size = model_.vertices.size() * sizeof(Vertex),
+        .size = model->vertices.size() * sizeof(Vertex),
         .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
     };
 
@@ -669,24 +700,24 @@ void Application::upload_model(Model& model_)
         allocator, 
         &buffer_create_info,
         &alloc_create_info,
-        &model_.vertex_buffer.buffer,
-        &model_.vertex_buffer.allocation,
+        &model->vertex_buffer.buffer,
+        &model->vertex_buffer.allocation,
         nullptr)
     );
 
     // Map allocated memory to be accessible to the CPU
     void* vertex_data;
-    vmaMapMemory(allocator, model_.vertex_buffer.allocation, &vertex_data);
+    vmaMapMemory(allocator, model->vertex_buffer.allocation, &vertex_data);
 
     // Copy the model vertex data to the allocated memory block
-    const size_t buf_sz = model_.vertices.size() * sizeof(Vertex);
-    memcpy(vertex_data, model_.vertices.data(), buf_sz);
+    const size_t buf_sz = model->vertices.size() * sizeof(Vertex);
+    memcpy(vertex_data, model->vertices.data(), buf_sz);
 
     // Unmap the memory to release it back to the allocator
-    vmaUnmapMemory(allocator, model_.vertex_buffer.allocation);
+    vmaUnmapMemory(allocator, model->vertex_buffer.allocation);
 
     // Add model to models in scene
-    models.push_back(model_);
+    models.push_back(model);
 }
 
 void Application::pipe_cleanup(

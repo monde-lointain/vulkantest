@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <vulkan/vulkan_core.h>
 
@@ -15,6 +16,7 @@ struct VertexInputDescription
 struct Vertex
 {
 	glm::vec3 position;
+	glm::vec2 texcoord;
 	glm::vec3 normal;
 	glm::vec3 color;
 };
