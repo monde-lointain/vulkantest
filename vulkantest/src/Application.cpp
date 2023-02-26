@@ -49,6 +49,16 @@ void Application::update()
                     running = false;
                     break;
                 }
+                if (event.key.keysym.sym == SDLK_1)
+                {
+                    render_mode = RAINBOW;
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_2)
+                {
+                    render_mode = SOLID;
+                    break;
+                }
             }
         }
     }
@@ -118,12 +128,26 @@ void Application::render()
         VK_SUBPASS_CONTENTS_INLINE
     );
 
-    // Draw a triangle to the screen
-	vkCmdBindPipeline(
-		main_command_buffer, 
+    // Choose a pipeline based on the render mode
+    VkPipeline pipe = nullptr;
+    switch (render_mode)
+    {
+        case SOLID:
+            pipe = solid_pipe;
+            break;
+        case RAINBOW:
+            pipe = rainbow_pipe;
+            break;
+    }
+
+    // Bind pipeline to the command buffer
+    vkCmdBindPipeline(
+        main_command_buffer, 
         VK_PIPELINE_BIND_POINT_GRAPHICS, 
-        pipeline
+        pipe
     );
+
+    // Draw a triangle to the screen
     vkCmdDraw(main_command_buffer, 3, 1, 0, 0);
 
     // Finalize render stage commands
@@ -220,28 +244,65 @@ void Application::run()
     }
 }
 
-void Application::destroy() const
+void Application::destroy()
 {
-    // Free Vulkan resources
+    destroy_vulkan_resources();
+
+    // Free SDL resources
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+}
+
+void Application::destroy_vulkan_resources()
+{
+    // Wait until the GPU is completely idle to free things
+    vkDeviceWaitIdle(device);
+
     vkDestroySemaphore(device, present_semaphore, nullptr);
     vkDestroySemaphore(device, render_semaphore, nullptr);
-    vkDestroyFence(device, render_fence, nullptr);
-    vkDestroyCommandPool(device, command_pool, nullptr);
-    vkDestroyRenderPass(device, render_pass, nullptr);
-    vkDestroySwapchainKHR(device, swapchain, nullptr);
+    if (rainbow_pipe)
+    {
+        vkDestroyPipeline(device, rainbow_pipe, nullptr);
+    }
+    if (solid_pipe)
+    {
+        vkDestroyPipeline(device, solid_pipe, nullptr);
+    }
+    if (pipeline_layout)
+    {
+        vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
+    }
+    if (render_fence)
+    {
+        vkDestroyFence(device, render_fence, nullptr);
+    }
+    if (command_pool)
+    {
+        vkDestroyCommandPool(device, command_pool, nullptr);
+    }
+    if (render_pass)
+    {
+        vkDestroyRenderPass(device, render_pass, nullptr);
+    }
+    if (swapchain)
+    {
+        vkDestroySwapchainKHR(device, swapchain, nullptr);
+    }
     for (size_t i = 0; i < framebuffers.size(); i++)
     {
         vkDestroyFramebuffer(device, framebuffers[i], nullptr);
         vkDestroyImageView(device, swapchain_image_views[i], nullptr);
     }
-    vkDestroySurfaceKHR(instance, surface, nullptr);
-    vkDestroyDevice(device, nullptr);
+    if (surface)
+    {
+        vkDestroySurfaceKHR(instance, surface, nullptr);
+    }
+    if (device)
+    {
+        vkDestroyDevice(device, nullptr);
+    }
     vkb::destroy_debug_utils_messenger(instance, debug_messenger);
     vkDestroyInstance(instance, nullptr);
-
-    // Free SDL resources
-    SDL_DestroyWindow(window);
-    SDL_Quit();
 }
 
 void Application::init_instance()
@@ -249,7 +310,7 @@ void Application::init_instance()
     // Create a Vulkan instance and debug messenger
     vkb::InstanceBuilder builder;
     builder.set_app_name("Vulkan Renderer");
-    builder.require_api_version(1, 1, 0);
+    builder.require_api_version(1, 3, 0);
     if (VALIDATION_LAYERS_ON)
     {
         builder.request_validation_layers(true); // Enables "VK_LAYER_KHRONOS_validation"
@@ -381,7 +442,7 @@ VkShaderModule Application::load_shader_module(const char* filename) const
 
     if (!file.is_open())
     {
-        std::string err("Failed to open file: ");
+        const std::string err("Failed to open file: ");
         throw std::runtime_error(err + filename);
     }
 
@@ -476,18 +537,18 @@ void Application::init_sync_objects()
 
 void Application::init_pipelines()
 {
-    // Set up the shaders
+    // Set up the shaders for the solid triangle pipeline
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages;
     VkPipelineShaderStageCreateInfo stage;
     VkShaderModule module;
 
     // Vertex stage
-    module = load_shader_module("shaders/spirv/trivert.spv");
+    module = load_shader_module("shaders/spirv/tri_vert.spv");
     stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, module);
     shader_stages.push_back(stage);
 
     // Fragment stage
-    module = load_shader_module("shaders/spirv/trifrag.spv");
+    module = load_shader_module("shaders/spirv/tri_frag.spv");
     stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, module);
     shader_stages.push_back(stage);
 
@@ -516,6 +577,31 @@ void Application::init_pipelines()
         .pipeline_layout = pipeline_layout
     };
 
-    // Build the pipeline
-    pipeline = builder.build_pipeline(device, render_pass);
+    // Build the solid color pipeline
+    solid_pipe = builder.build_pipeline(device, render_pass);
+
+    // We don't need the shader modules anymore now the pipeline is built
+    vkDestroyShaderModule(device, builder.shader_stages[0].module, nullptr);
+    vkDestroyShaderModule(device, builder.shader_stages[1].module, nullptr);
+
+    // Clear the shader stages arrays for the next pipeline
+    builder.shader_stages.clear();
+    shader_stages.clear();
+
+    // Load shaders for the rainbow pipeline
+    module = load_shader_module("shaders/spirv/rainbow_tri_vert.spv");
+    stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, module);
+    shader_stages.push_back(stage);
+
+    module = load_shader_module("shaders/spirv/rainbow_tri_frag.spv");
+    stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, module);
+    shader_stages.push_back(stage);
+
+    // Build the rainbow pipeline using the new shaders
+    builder.shader_stages = shader_stages;
+    rainbow_pipe = builder.build_pipeline(device, render_pass);
+
+    // Destroy the shaders for this pipeline now too
+    vkDestroyShaderModule(device, builder.shader_stages[0].module, nullptr);
+    vkDestroyShaderModule(device, builder.shader_stages[1].module, nullptr);
 }

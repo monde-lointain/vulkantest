@@ -1,7 +1,14 @@
 #pragma once
 
 #include <vector>
+
 #include <vulkan/vulkan_core.h>
+
+enum ERenderMode
+{
+    RAINBOW,
+    SOLID,
+};
 
 struct SDL_Window;
 
@@ -11,7 +18,7 @@ struct Application
 
     void run();
 
-    void destroy() const;
+    void destroy();
 
     void setup();
 
@@ -28,6 +35,8 @@ struct Application
     int current_frame = 0;
     float target_seconds_per_frame = 0.0f;
     bool running = false;
+
+    ERenderMode render_mode = SOLID;
 
     void init_instance();
 
@@ -48,6 +57,8 @@ struct Application
     //void init_scene();
 
     //void init_descriptors();
+
+    void destroy_vulkan_resources();
 
     /** The Vulkan instance. Used to access Vulkan drivers. */
     VkInstance instance = nullptr;
@@ -76,9 +87,7 @@ struct Application
      */
     VkSurfaceKHR surface = nullptr;
 
-    /**
-     * A collection of images that are rendered to a Vulkan surface.
-     */
+    /** A collection of images that are rendered to a Vulkan surface. */
     VkSwapchainKHR swapchain = nullptr;
 
     /** Pixel format of the swapchain. */
@@ -111,13 +120,14 @@ struct Application
      */
     VkRenderPass render_pass = nullptr;
 
-    /** The graphics pipeline */
-    VkPipeline pipeline = nullptr;
+    /** Graphics pipelines for triangle filling */
+    VkPipeline rainbow_pipe = nullptr;
+    VkPipeline solid_pipe = nullptr;
 
-    /** The pipeline layout for resources. */
+    /** Pipeline layout for resources. */
     VkPipelineLayout pipeline_layout = nullptr;
 
-    /** The main buffer for writing commands into. */
+    /** Pipeline layout for resources. */
     VkCommandBuffer main_command_buffer;
 
     /** Manages memory for the command buffer. */
