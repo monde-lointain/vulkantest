@@ -31,7 +31,7 @@ VertexInputDescription get_vertex_input_description()
 
     // Set texture coordinate to be location 1
     const VkVertexInputAttributeDescription texcoord_attr = {
-        .location = 0,
+        .location = 1,
         .binding = 0,
         .format = VK_FORMAT_R32G32_SFLOAT,
         .offset = texcoord_offset
@@ -39,7 +39,7 @@ VertexInputDescription get_vertex_input_description()
 
     // Set normal to be location 2
     const VkVertexInputAttributeDescription normal_attr = {
-        .location = 1,
+        .location = 2,
         .binding = 0,
         .format = VK_FORMAT_R32G32B32_SFLOAT,
         .offset = normal_offset
@@ -47,7 +47,7 @@ VertexInputDescription get_vertex_input_description()
 
     // Set color to be location 3
     const VkVertexInputAttributeDescription color_attr = {
-        .location = 2,
+        .location = 3,
         .binding = 0,
         .format = VK_FORMAT_R32G32B32_SFLOAT,
         .offset = color_offset

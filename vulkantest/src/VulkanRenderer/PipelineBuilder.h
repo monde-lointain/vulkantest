@@ -15,6 +15,7 @@ struct PipelineBuilder
     VkPipelineRasterizationStateCreateInfo raster;
     VkPipelineColorBlendAttachmentState blend_attachment;
     VkPipelineMultisampleStateCreateInfo multisample;
+    VkPipelineDepthStencilStateCreateInfo depth_stencil;
     VkPipelineLayout pipeline_layout;
 
     VkPipeline build_pipeline(VkDevice device, VkRenderPass pass);

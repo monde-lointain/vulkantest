@@ -1,5 +1,6 @@
 #include "Application.h"
 
+#include <array>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -113,10 +114,19 @@ void Application::render()
     };
     VK_CHECK(vkBeginCommandBuffer(main_command_buffer, &cmd_buf_begin_info));
 
-    // Set draw color for clearing the screen
-    VkClearValue clear_value;
+    // Set color clear value
+    VkClearValue color_clear_value;
     //float flash = fabsf(sinf((float)current_frame / 120.f));
-    clear_value.color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+    color_clear_value.color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+
+    // Set depth clear value
+    VkClearValue depth_clear_value;
+    depth_clear_value.depthStencil.depth = 1.0f;
+
+    std::array<VkClearValue, 2> clear_values = {
+        color_clear_value, 
+        depth_clear_value
+    };
 
     // Begin a render pass
     const VkRenderPassBeginInfo render_pass_begin_info = {
@@ -125,8 +135,8 @@ void Application::render()
         .renderPass = render_pass,
         .framebuffer = framebuffers[swapchain_image_index],
         .renderArea = scissor,
-        .clearValueCount = 1,
-        .pClearValues = &clear_value
+        .clearValueCount = (uint32_t)clear_values.size(),
+        .pClearValues = &clear_values.data()[0]
     };
     vkCmdBeginRenderPass(
         main_command_buffer, 
@@ -153,38 +163,43 @@ void Application::render()
         pipeline
     );
 
-    for (Model* model : models)
+    for (const std::unique_ptr<Model>& model : models)
     {
-		// Bind vertex buffer to the command buffer with an offset of zero
-		const VkDeviceSize offset = 0;
-		vkCmdBindVertexBuffers(
-			main_command_buffer, 0, 1, &model->vertex_buffer.buffer, &offset);
+        // Bind vertex buffer to the command buffer with an offset of zero
+        const VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(
+            main_command_buffer, 
+            0, 
+            1, 
+            &model->vertex_buffer.buffer, 
+            &offset
+        );
 
-		// Create MVP matrix
-		glm::vec3 camera_translation(0.0f, 0.0f, -2.0f);
-		glm::mat4 view_matrix = glm::lookAt(
-			camera_translation, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-		glm::mat4 projection_matrix = glm::perspective(glm::radians(60.0f),
-			(float)window_extent.width / (float)window_extent.height, 0.1f,
-			1000.0f);
-		float rot = (float)current_frame * 0.2f;
-		glm::mat4 model_matrix = glm::rotate(
-			glm::mat4(1.0f), glm::radians(rot), glm::vec3(0.0f, 1.0f, 0.0f));
-		glm::mat4 modelviewprojection =
-			projection_matrix * view_matrix * model_matrix;
+        // Create MVP matrix
+        glm::vec3 camera_translation(0.0f, 0.0f, -5.0f);
+        glm::mat4 view_matrix = glm::lookAt(
+            camera_translation, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 projection_matrix = glm::perspective(glm::radians(60.0f),
+            (float)window_extent.width / (float)window_extent.height, 0.1f,
+            1000.0f);
+        float rot = (float)current_frame * 0.2f;
+        glm::mat4 model_matrix = glm::rotate(
+            glm::mat4(1.0f), glm::radians(rot), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 modelviewprojection =
+            projection_matrix * view_matrix * model_matrix;
 
-		// Upload MVP matrix to GPU via push constants
-		MeshPushConstants push_constants = {
-			.modelviewprojection = modelviewprojection
+        // Upload MVP matrix to GPU via push constants
+        MeshPushConstants push_constants = {
+            .modelviewprojection = modelviewprojection
         };
 
-		vkCmdPushConstants(
+        vkCmdPushConstants(
             main_command_buffer, 
             pipeline_layout,
-			VK_SHADER_STAGE_VERTEX_BIT, 
+            VK_SHADER_STAGE_VERTEX_BIT, 
             0, 
             sizeof(MeshPushConstants),
-			&push_constants
+            &push_constants
         );
 
         // Draw the model
@@ -303,7 +318,7 @@ void Application::destroy_vulkan_resources()
     // Wait until the GPU is completely idle
     vkDeviceWaitIdle(device);
 
-    for (const Model* model : models)
+    for (const std::unique_ptr<Model>& model : models)
     {
         vmaDestroyBuffer(
             allocator, 
@@ -333,6 +348,11 @@ void Application::destroy_vulkan_resources()
     {
         vkDestroyRenderPass(device, render_pass, nullptr);
     }
+    if (depth_image_view)
+    {
+        vkDestroyImageView(device, depth_image_view, nullptr);
+    }
+    vmaDestroyImage(allocator, depth_image.image, depth_image.allocation);
     if (swapchain)
     {
         vkDestroySwapchainKHR(device, swapchain, nullptr);
@@ -367,7 +387,7 @@ void Application::init_instance()
     if (VALIDATION_LAYERS_ON)
     {
         builder.request_validation_layers(true); // Enables "VK_LAYER_KHRONOS_validation"
-        /*builder.enable_layer("VK_LAYER_LUNARG_api_dump");*/
+        builder.enable_layer("VK_LAYER_LUNARG_api_dump");
         builder.use_default_debug_messenger();
     }
     const vkb::Instance vkb_inst = builder.build().value();
@@ -421,13 +441,59 @@ void Application::init_swapchain()
     image_format = vkbSwapchain.image_format;
     swapchain_images = vkbSwapchain.get_images().value();
     swapchain_image_views = vkbSwapchain.get_image_views().value();
+
+    // Configure the depth image
+    const VkExtent3D depth_image_extent = {
+        .width = window_extent.width,
+        .height = window_extent.height,
+        .depth = 1
+    };
+
+    depth_format = VK_FORMAT_D32_SFLOAT;
+
+    const VkImageCreateInfo image_create_info = vkinit::image_create_info(
+        depth_format,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        depth_image_extent
+    );
+
+    // Create depth image
+    const VmaAllocationCreateInfo image_alloc_info = {
+        .usage = VMA_MEMORY_USAGE_GPU_ONLY,
+        .requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+    };
+
+    VK_CHECK(vmaCreateImage(
+        allocator,
+        &image_create_info,
+        &image_alloc_info,
+        &depth_image.image,
+        &depth_image.allocation,
+        nullptr)
+    );
+
+    // Create depth image view
+    const VkImageViewCreateInfo image_view_create_info =
+        vkinit::imageview_create_info(
+            depth_format, 
+            depth_image.image, 
+            VK_IMAGE_ASPECT_DEPTH_BIT
+        );
+
+    VK_CHECK(vkCreateImageView(
+        device, 
+        &image_view_create_info, 
+        nullptr, 
+        &depth_image_view)
+    );
 }
 
 void Application::init_default_renderpass()
 {
-	// Define attachments to use for the render pass. We'll use just one color
-	// attachment for now
+    // Define attachments to use for the render pass
+    // Color attachment
     const VkAttachmentDescription color_attachment = {
+        .flags = 0,
         .format = image_format,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
@@ -438,27 +504,81 @@ void Application::init_default_renderpass()
         .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
     };
 
-    // Reference to the color attachment for render subpasses
     const VkAttachmentReference color_attachment_ref = {
         .attachment = 0,
         .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
     };
 
-    // Define attachments for the render subpasses. Only one render pass for
-	// now, which will use the color attachment above
+    // Depth attachment
+    const VkAttachmentDescription depth_attachment =
+    {
+        .flags = 0,
+        .format = depth_format,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    };
+
+    const VkAttachmentReference depth_attachment_ref = {
+        .attachment = 1,
+        .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    };
+
+    // Define attachments for render subpass
     const VkSubpassDescription subpass = {
         .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
         .colorAttachmentCount = 1,
-        .pColorAttachments = &color_attachment_ref
+        .pColorAttachments = &color_attachment_ref,
+        .pDepthStencilAttachment = &depth_attachment_ref
+    };
+
+    // Define attachments for render pass
+    std::array<VkAttachmentDescription, 2> attachments = {
+        color_attachment,
+        depth_attachment
+    };
+
+    // Create dependencies for color and depth attachments
+    VkSubpassDependency color_dependency = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+    };
+
+    // Sycnhronize access to depth attachments
+    const VkSubpassDependency depth_dependency = {
+        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        .dstSubpass = 0,
+        .srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | 
+                        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | 
+                        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+    };
+
+    // Define dependencies for render pass
+    std::array<VkSubpassDependency, 2> dependencies = {
+        color_dependency, 
+        depth_dependency
     };
 
     // Create render pass
     const VkRenderPassCreateInfo render_pass_create_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-        .attachmentCount = 1,
-        .pAttachments = &color_attachment,
+        .attachmentCount = (uint32_t)attachments.size(),
+        .pAttachments = &attachments.data()[0],
         .subpassCount = 1,
-        .pSubpasses = &subpass
+        .pSubpasses = &subpass,
+        .dependencyCount = (uint32_t)dependencies.size(),
+        .pDependencies = &dependencies.data()[0]
     };
     VK_CHECK(vkCreateRenderPass(
         device, 
@@ -470,8 +590,8 @@ void Application::init_default_renderpass()
 
 void Application::init_framebuffers()
 {
-	// Create framebuffers for the swapchain images. This will connect the
-	// render pass to the images for rendering
+    // Create framebuffers for the swapchain images. This will connect the
+    // render pass to the images for rendering
     VkFramebufferCreateInfo fb_create_info = {
         .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
         .pNext = nullptr,
@@ -486,10 +606,16 @@ void Application::init_framebuffers()
     const int swapchain_image_count = (int)swapchain_images.size();
     framebuffers = std::vector<VkFramebuffer>(swapchain_image_count);
 
+    std::array<VkImageView, 2> attachments;
     // Create framebuffers for each swapchain image view
     for (int i = 0; i < swapchain_image_count; i++)
     {
-        fb_create_info.pAttachments = &swapchain_image_views[i];
+        attachments[0] = swapchain_image_views[i];
+        attachments[1] = depth_image_view;
+
+        fb_create_info.attachmentCount = (uint32_t)attachments.size();
+        fb_create_info.pAttachments = attachments.data();
+
         VK_CHECK(vkCreateFramebuffer(
             device, 
             &fb_create_info, 
@@ -651,6 +777,7 @@ void Application::init_pipelines()
         .raster = vkinit::rasterization_state_create_info(VK_POLYGON_MODE_FILL),
         .blend_attachment = vkinit::color_blend_attachment_state(),
         .multisample = vkinit::multisample_state_create_info(),
+        .depth_stencil = vkinit::depth_stencil_create_info(true, true, VK_COMPARE_OP_LESS_OR_EQUAL),
         .pipeline_layout = pipeline_layout
     };
 
@@ -677,10 +804,13 @@ void Application::load_models()
 
     cube = create_model("assets/models/cube/cube.obj");
 
-    upload_model(cube);
+    if (cube)
+    {
+        upload_model(cube);
+    }
 }
 
-void Application::upload_model(Model* model)
+void Application::upload_model(std::unique_ptr<Model>& model)
 {
     // Specify info about the vertex buffer to create
     const VkBufferCreateInfo buffer_create_info = {
@@ -717,7 +847,7 @@ void Application::upload_model(Model* model)
     vmaUnmapMemory(allocator, model->vertex_buffer.allocation);
 
     // Add model to models in scene
-    models.push_back(model);
+    models.push_back(std::move(model));
 }
 
 void Application::pipe_cleanup(

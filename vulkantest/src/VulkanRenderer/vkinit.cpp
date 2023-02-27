@@ -125,7 +125,7 @@ vkinit::color_blend_attachment_state()
 VkPipelineLayoutCreateInfo
 vkinit::pipeline_layout_create_info()
 {
-    const VkPipelineLayoutCreateInfo layout_info = {
+    const VkPipelineLayoutCreateInfo layout = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
@@ -134,7 +134,7 @@ vkinit::pipeline_layout_create_info()
         .pushConstantRangeCount = 0,
         .pPushConstantRanges = nullptr
     };
-    return layout_info;
+    return layout;
 }
 
 VkVertexInputAttributeDescription
@@ -152,4 +152,70 @@ vkinit::vertex_input_attribute_description(
         .offset = offset
     };
     return vertex_input_attribute;
+}
+
+VkImageCreateInfo
+vkinit::image_create_info(
+    VkFormat format, 
+    VkImageUsageFlags usage, 
+    VkExtent3D extent
+)
+{
+    const VkImageCreateInfo image = { 
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = nullptr,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = extent,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = usage
+    };
+    return image;
+}
+
+VkImageViewCreateInfo vkinit::imageview_create_info(
+    VkFormat format, 
+    VkImage image, 
+    VkImageAspectFlags aspect_flags
+)
+{
+    VkImageViewCreateInfo imageview = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = nullptr,
+        .image = image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = format,
+        .subresourceRange = {
+            .aspectMask = aspect_flags,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        }
+    };
+    return imageview;
+}
+
+VkPipelineDepthStencilStateCreateInfo
+vkinit::depth_stencil_create_info(
+    bool should_depth_test, 
+    bool should_depth_write, 
+    VkCompareOp compare_op
+)
+{
+    const VkPipelineDepthStencilStateCreateInfo depth_stencil = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .pNext = nullptr,
+        .depthTestEnable = should_depth_test ? VK_TRUE : VK_FALSE,
+        .depthWriteEnable = should_depth_write ? VK_TRUE : VK_FALSE,
+        .depthCompareOp = should_depth_test ? compare_op : VK_COMPARE_OP_ALWAYS,
+        .depthBoundsTestEnable = VK_FALSE,
+        .stencilTestEnable = VK_FALSE,
+        .minDepthBounds = 0.0f,
+        .maxDepthBounds = 1.0f,
+    };
+    return depth_stencil;
 }

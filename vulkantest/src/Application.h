@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include <glm/mat4x4.hpp>
@@ -129,6 +130,13 @@ struct Application
     std::vector<VkImageView> swapchain_image_views = std::vector<VkImageView>();
     std::vector<VkImage> swapchain_images = std::vector<VkImage>();
 
+    /** Image buffer to store depth values in */
+    VkImageView depth_image_view = {};
+    Image depth_image = {};
+
+    /** Format of the depth image */
+    VkFormat depth_format = VK_FORMAT_UNDEFINED;
+
     /**
      * Array of framebuffers for each swapchain image view. A Vulkan framebuffer
      * is a handle to a collection of attachments that define a rendering target
@@ -169,10 +177,10 @@ struct Application
 
     void load_models();
 
-    void upload_model(Model *model);
+    void upload_model(std::unique_ptr<Model>& model);
 
-	Model triangle = {};
-	Model *cube = nullptr;
+    Model triangle = {};
+    std::unique_ptr<Model> cube = nullptr;
 
-	std::vector<Model *> models;
+    std::vector<std::unique_ptr<Model>> models;
 };

@@ -50,4 +50,25 @@ namespace vkinit
         VkFormat format, 
         uint32_t offset
     );
+
+    VkImageCreateInfo
+    image_create_info(
+        VkFormat format, 
+        VkImageUsageFlags usage, 
+        VkExtent3D extent
+    );
+
+    VkImageViewCreateInfo
+    imageview_create_info(
+        VkFormat format,
+        VkImage image,
+        VkImageAspectFlags aspectFlags
+    );
+
+    VkPipelineDepthStencilStateCreateInfo
+    depth_stencil_create_info(
+        bool should_depth_test,
+        bool should_depth_write,
+        VkCompareOp compare_op
+    );
 };	  // namespace vkinit
