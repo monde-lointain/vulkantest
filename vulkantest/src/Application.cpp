@@ -1,6 +1,5 @@
 #include "Application.h"
 
-#include <array>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -82,28 +81,36 @@ void Application::render()
     do
     {
         result = vkWaitForFences(
-            device, 
+            context.device, 
             1, 
-            &render_fence, 
+            &get_current_frame().queue_submit_fence,
             true, 
             TIMEOUT_PERIOD
         );
     } while (result == VK_TIMEOUT);
-    VK_CHECK(vkResetFences(device, 1, &render_fence));
+    VK_CHECK(vkResetFences(
+        context.device, 
+        1, 
+        &get_current_frame().queue_submit_fence)
+    );
 
     // Request an image from swapchain
     uint32_t swapchain_image_index;
     VK_CHECK(vkAcquireNextImageKHR(
-        device, 
-        swapchain, 
+        context.device,
+        context.swapchain,
         TIMEOUT_PERIOD,
-        present_semaphore, 
+        get_current_frame().swapchain_acquire_semaphore,
         nullptr, 
         &swapchain_image_index)
     );
 
     // Clear all command buffers
-    VK_CHECK(vkResetCommandPool(device, command_pool, 0));
+    VK_CHECK(vkResetCommandPool(
+        context.device, 
+        get_current_frame().primary_command_pool,
+        0)
+    );
 
     // Start recording commands into the command buffer
     const VkCommandBufferBeginInfo cmd_buf_begin_info = {
@@ -112,7 +119,10 @@ void Application::render()
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         .pInheritanceInfo = nullptr
     };
-    VK_CHECK(vkBeginCommandBuffer(main_command_buffer, &cmd_buf_begin_info));
+    VK_CHECK(vkBeginCommandBuffer(
+        get_current_frame().primary_command_buffer,
+        &cmd_buf_begin_info)
+    );
 
     // Set color clear value
     VkClearValue color_clear_value;
@@ -132,14 +142,14 @@ void Application::render()
     const VkRenderPassBeginInfo render_pass_begin_info = {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
         .pNext = nullptr,
-        .renderPass = render_pass,
-        .framebuffer = framebuffers[swapchain_image_index],
+        .renderPass = context.render_pass,
+        .framebuffer = context.framebuffers[swapchain_image_index],
         .renderArea = scissor,
         .clearValueCount = (uint32_t)clear_values.size(),
         .pClearValues = &clear_values.data()[0]
     };
     vkCmdBeginRenderPass(
-        main_command_buffer, 
+        get_current_frame().primary_command_buffer,
         &render_pass_begin_info,
         VK_SUBPASS_CONTENTS_INLINE
     );
@@ -158,9 +168,9 @@ void Application::render()
 
     // Bind pipeline to the command buffer
     vkCmdBindPipeline(
-        main_command_buffer, 
+        get_current_frame().primary_command_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS, 
-        pipeline
+        context.pipeline
     );
 
     for (const std::unique_ptr<Model>& model : models)
@@ -168,34 +178,69 @@ void Application::render()
         // Bind vertex buffer to the command buffer with an offset of zero
         const VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(
-            main_command_buffer, 
+            get_current_frame().primary_command_buffer,
             0, 
             1, 
             &model->vertex_buffer.buffer, 
             &offset
         );
 
-        // Create MVP matrix
-        glm::vec3 camera_translation(0.0f, 0.0f, -5.0f);
-        glm::mat4 view_matrix = glm::lookAt(
-            camera_translation, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 projection_matrix = glm::perspective(glm::radians(60.0f),
-            (float)window_extent.width / (float)window_extent.height, 0.1f,
-            1000.0f);
-        float rot = (float)current_frame * 0.2f;
-        glm::mat4 model_matrix = glm::rotate(
-            glm::mat4(1.0f), glm::radians(rot), glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 modelviewprojection =
-            projection_matrix * view_matrix * model_matrix;
+        // Create view matrix
+        const glm::vec3 camera_translation(0.0f, 0.0f, -5.0f);
+        const glm::vec3 target(0.0f);
+        const glm::vec3 world_up(0.0f, 1.0f, 0.0f);
 
-        // Upload MVP matrix to GPU via push constants
+        const glm::mat4 view_matrix =
+            glm::lookAt(camera_translation, target, world_up);
+
+        // Create projection matrix
+        const float fov = glm::radians(60.0f);
+        const float aspect = (float)window_extent.width / (float)window_extent.height;
+        const float znear = 0.1f;
+        const float zfar = 1000.0f;
+
+        const glm::mat4 projection_matrix =
+            glm::perspective(fov, aspect, znear, zfar);
+
+        // Create model matrix
+        const float rot = (float)current_frame * 0.005f;
+
+        const glm::mat4 translation_matrix =
+            glm::translate(glm::mat4(1.0f), glm::vec3(0.0f));
+
+        const glm::mat4 rotation_x_matrix =
+            glm::rotate(glm::mat4(1.0f), rot, glm::vec3(1.0f, 0.0f, 0.0f));
+
+        const glm::mat4 rotation_y_matrix =
+            glm::rotate(glm::mat4(1.0f), rot, glm::vec3(0.0f, 1.0f, 0.0f));
+
+        const glm::mat4 rotation_z_matrix =
+            glm::rotate(glm::mat4(1.0f), rot, glm::vec3(0.0f, 0.0f, 1.0f));
+
+        const glm::mat4 scale_matrix =
+            glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
+
+        const glm::mat4 rotation_matrix = rotation_x_matrix 
+                                          * rotation_y_matrix 
+                                          * rotation_z_matrix;
+
+        const glm::mat4 model_matrix = translation_matrix 
+                                       * rotation_matrix 
+                                       * scale_matrix;
+
+        // Create model-view-projection matrix
+        const glm::mat4 modelviewprojection = projection_matrix
+                                              * view_matrix 
+                                              * model_matrix;
+
+        // Upload MVP to GPU via push constants
         MeshPushConstants push_constants = {
             .modelviewprojection = modelviewprojection
         };
 
         vkCmdPushConstants(
-            main_command_buffer, 
-            pipeline_layout,
+            get_current_frame().primary_command_buffer,
+            context.pipeline_layout,
             VK_SHADER_STAGE_VERTEX_BIT, 
             0, 
             sizeof(MeshPushConstants),
@@ -203,40 +248,47 @@ void Application::render()
         );
 
         // Draw the model
-        vkCmdDraw(main_command_buffer, (uint32_t)model->vertices.size(), 1, 0, 0);
+        vkCmdDraw(get_current_frame().primary_command_buffer,
+            (uint32_t)model->vertices.size(), 1, 0, 0);
     }
 
     // Finalize render stage commands
-    vkCmdEndRenderPass(main_command_buffer);
-    VK_CHECK(vkEndCommandBuffer(main_command_buffer));
+    vkCmdEndRenderPass(get_current_frame().primary_command_buffer);
+    VK_CHECK(vkEndCommandBuffer(get_current_frame().primary_command_buffer));
 
     // Submit command buffer to the graphics queue
-    const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    const VkPipelineStageFlags wait_stage =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     const VkSubmitInfo submit_info = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .pNext = nullptr,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &present_semaphore,
+        .pWaitSemaphores = &get_current_frame().swapchain_acquire_semaphore,
         .pWaitDstStageMask = &wait_stage,
         .commandBufferCount = 1,
-        .pCommandBuffers = &main_command_buffer,
+        .pCommandBuffers = &get_current_frame().primary_command_buffer,
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &render_semaphore
+        .pSignalSemaphores = &get_current_frame().swapchain_release_semaphore
     };
-    VK_CHECK(vkQueueSubmit(queue, 1, &submit_info, render_fence));
+    VK_CHECK(vkQueueSubmit(
+        context.queue, 
+        1, 
+        &submit_info, 
+        get_current_frame().queue_submit_fence)
+    );
 
     // Present image to the swap chain
     const VkPresentInfoKHR present_info = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .pNext = nullptr,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &render_semaphore,
+        .pWaitSemaphores = &get_current_frame().swapchain_release_semaphore,
         .swapchainCount = 1,
-        .pSwapchains = &swapchain,
+        .pSwapchains = &context.swapchain,
         .pImageIndices = &swapchain_image_index
     };
-    VK_CHECK(vkQueuePresentKHR(queue, &present_info));
+    VK_CHECK(vkQueuePresentKHR(context.queue, &present_info));
 }
 
 void Application::initialize()
@@ -244,12 +296,8 @@ void Application::initialize()
     // Initialize SDL
     if (SDL_Init(SDL_INIT_EVERYTHING) != 0)
     {
-        SDL_ShowSimpleMessageBox(
-            SDL_MESSAGEBOX_ERROR,
-            window_name,
-            "Failed to initialize SDL.",
-            nullptr
-        );
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, window_name,
+            "Failed to initialize SDL.", nullptr);
         return;
     }
 
@@ -262,12 +310,8 @@ void Application::initialize()
     );
     if (!window)
     {
-        SDL_ShowSimpleMessageBox(
-            SDL_MESSAGEBOX_ERROR,
-            window_name,
-            "Failed to initialize SDL window.",
-            nullptr
-        );
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, window_name,
+            "Failed to initialize SDL window.", nullptr);
         SDL_Quit();
         return;
     }
@@ -278,9 +322,9 @@ void Application::initialize()
     init_swapchain();
     init_default_renderpass();
     init_framebuffers();
-    init_commands();
+    init_per_frames();
     //init_descriptors();
-    init_sync_objects();
+    //init_sync_objects();
     init_pipelines();
 
     // Load models into the scene
@@ -313,69 +357,90 @@ void Application::destroy()
     SDL_Quit();
 }
 
+void Application::destroy_per_frames()
+{
+    for (const PerFrame &frame : context.frames)
+    {
+        if (frame.swapchain_acquire_semaphore)
+        {
+            vkDestroySemaphore(
+                context.device, frame.swapchain_acquire_semaphore, nullptr);
+        }
+        if (frame.swapchain_release_semaphore)
+        {
+            vkDestroySemaphore(
+                context.device, frame.swapchain_release_semaphore, nullptr);
+        }
+        if (frame.queue_submit_fence)
+        {
+            vkDestroyFence(context.device, frame.queue_submit_fence, nullptr);
+        }
+        if (frame.primary_command_pool)
+        {
+            vkDestroyCommandPool(
+                context.device, frame.primary_command_pool, nullptr);
+        }
+    }
+}
+
 void Application::destroy_vulkan_resources()
 {
     // Wait until the GPU is completely idle
-    vkDeviceWaitIdle(device);
+    vkDeviceWaitIdle(context.device);
 
-    for (const std::unique_ptr<Model>& model : models)
+    for (const std::unique_ptr<Model> &model : models)
     {
-        vmaDestroyBuffer(
-            allocator, 
-            model->vertex_buffer.buffer,
-            model->vertex_buffer.allocation
-        );
+        vmaDestroyBuffer(context.allocator, model->vertex_buffer.buffer,
+            model->vertex_buffer.allocation);
     }
-    vkDestroySemaphore(device, present_semaphore, nullptr);
-    vkDestroySemaphore(device, render_semaphore, nullptr);
-    if (pipeline)
+    if (context.pipeline)
     {
-        vkDestroyPipeline(device, pipeline, nullptr);
+        vkDestroyPipeline(context.device, context.pipeline, nullptr);
     }
-    if (pipeline_layout)
+    if (context.pipeline_layout)
     {
-        vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
+        vkDestroyPipelineLayout(
+            context.device, context.pipeline_layout, nullptr);
     }
-    if (render_fence)
+    destroy_per_frames();
+    if (context.render_pass)
     {
-        vkDestroyFence(device, render_fence, nullptr);
+        vkDestroyRenderPass(context.device, context.render_pass, nullptr);
     }
-    if (command_pool)
+    if (context.depth_image_view)
     {
-        vkDestroyCommandPool(device, command_pool, nullptr);
+        vkDestroyImageView(context.device, context.depth_image_view, nullptr);
     }
-    if (render_pass)
+    if (context.depth_image.allocation)
     {
-        vkDestroyRenderPass(device, render_pass, nullptr);
+        vmaDestroyImage(context.allocator, context.depth_image.image,
+            context.depth_image.allocation);
     }
-    if (depth_image_view)
+    if (context.swapchain)
     {
-        vkDestroyImageView(device, depth_image_view, nullptr);
+        vkDestroySwapchainKHR(context.device, context.swapchain, nullptr);
     }
-    vmaDestroyImage(allocator, depth_image.image, depth_image.allocation);
-    if (swapchain)
+    for (size_t i = 0; i < context.framebuffers.size(); i++)
     {
-        vkDestroySwapchainKHR(device, swapchain, nullptr);
+        vkDestroyFramebuffer(context.device, context.framebuffers[i], nullptr);
+        vkDestroyImageView(
+            context.device, context.swapchain_image_views[i], nullptr);
     }
-    for (size_t i = 0; i < framebuffers.size(); i++)
+    if (context.allocator)
     {
-        vkDestroyFramebuffer(device, framebuffers[i], nullptr);
-        vkDestroyImageView(device, swapchain_image_views[i], nullptr);
+        vmaDestroyAllocator(context.allocator);
     }
-    if (allocator)
+    if (context.surface)
     {
-        vmaDestroyAllocator(allocator);
+        vkDestroySurfaceKHR(context.instance, context.surface, nullptr);
     }
-    if (surface)
+    if (context.device)
     {
-        vkDestroySurfaceKHR(instance, surface, nullptr);
+        vkDestroyDevice(context.device, nullptr);
     }
-    if (device)
-    {
-        vkDestroyDevice(device, nullptr);
-    }
-    vkb::destroy_debug_utils_messenger(instance, debug_messenger);
-    vkDestroyInstance(instance, nullptr);
+    vkb::destroy_debug_utils_messenger(
+        context.instance, context.debug_messenger);
+    vkDestroyInstance(context.instance, nullptr);
 }
 
 void Application::init_instance()
@@ -387,60 +452,60 @@ void Application::init_instance()
     if (VALIDATION_LAYERS_ON)
     {
         builder.request_validation_layers(true); // Enables "VK_LAYER_KHRONOS_validation"
-        builder.enable_layer("VK_LAYER_LUNARG_api_dump");
+        /*builder.enable_layer("VK_LAYER_LUNARG_api_dump");*/
         builder.use_default_debug_messenger();
     }
     const vkb::Instance vkb_inst = builder.build().value();
 
-    instance = vkb_inst.instance;
-    debug_messenger = vkb_inst.debug_messenger;
+    context.instance = vkb_inst.instance;
+    context.debug_messenger = vkb_inst.debug_messenger;
 
     // Create a Vulkan surface to draw to
-    SDL_Vulkan_CreateSurface(window, instance, &surface);
+    SDL_Vulkan_CreateSurface(window, context.instance, &context.surface);
 
     // Select a GPU from the available physical devices
     vkb::PhysicalDeviceSelector selector(vkb_inst);
     selector.set_minimum_version(1, 3);
-    selector.set_surface(surface);
+    selector.set_surface(context.surface);
     const vkb::PhysicalDevice vkb_gpu = selector.select().value();
 
-    gpu = vkb_gpu.physical_device;
+    context.gpu = vkb_gpu.physical_device;
 
     // Create a Vulkan device for the selected GPU
     const vkb::DeviceBuilder device_builder(vkb_gpu);
     const vkb::Device vkb_device = device_builder.build().value();
 
-    device = vkb_device.device;
+    context.device = vkb_device.device;
 
     // Get graphics queue attributes
-    queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
-    graphics_queue_index = (int)vkb_device.get_queue_index(vkb::QueueType::graphics).value();
+    context.queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
+    context.graphics_queue_index =
+        (int)vkb_device.get_queue_index(vkb::QueueType::graphics).value();
 }
 
 void Application::init_allocator()
 {
     const VmaAllocatorCreateInfo allocator_create_info = {
-        .physicalDevice = gpu, 
-        .device = device, 
-        .instance = instance
+        .physicalDevice = context.gpu,
+        .device = context.device,
+        .instance = context.instance
     };
-    VK_CHECK(vmaCreateAllocator(&allocator_create_info, &allocator));
+    VK_CHECK(vmaCreateAllocator(&allocator_create_info, &context.allocator));
 }
 
 void Application::init_swapchain()
 {
     // Create a swapchain
-    vkb::SwapchainBuilder builder(gpu, device, surface);
+    vkb::SwapchainBuilder builder(context.gpu, context.device, context.surface);
     builder.use_default_format_selection();
     builder.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR); // use vsync
     builder.set_desired_min_image_count(vkb::SwapchainBuilder::TRIPLE_BUFFERING);
     builder.set_desired_extent(window_extent.width, window_extent.height);
     vkb::Swapchain vkbSwapchain = builder.build().value();
 
-    swapchain = vkbSwapchain.swapchain;
-    image_format = vkbSwapchain.image_format;
-    swapchain_images = vkbSwapchain.get_images().value();
-    swapchain_image_views = vkbSwapchain.get_image_views().value();
+    context.swapchain = vkbSwapchain.swapchain;
+    context.image_format = vkbSwapchain.image_format;
+    context.swapchain_image_views = vkbSwapchain.get_image_views().value();
 
     // Configure the depth image
     const VkExtent3D depth_image_extent = {
@@ -449,10 +514,10 @@ void Application::init_swapchain()
         .depth = 1
     };
 
-    depth_format = VK_FORMAT_D32_SFLOAT;
+    context.depth_format = VK_FORMAT_D32_SFLOAT;
 
     const VkImageCreateInfo image_create_info = vkinit::image_create_info(
-        depth_format,
+        context.depth_format,
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
         depth_image_extent
     );
@@ -462,29 +527,28 @@ void Application::init_swapchain()
         .usage = VMA_MEMORY_USAGE_GPU_ONLY,
         .requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
     };
-
     VK_CHECK(vmaCreateImage(
-        allocator,
+        context.allocator,
         &image_create_info,
         &image_alloc_info,
-        &depth_image.image,
-        &depth_image.allocation,
+        &context.depth_image.image,
+        &context.depth_image.allocation,
         nullptr)
     );
 
     // Create depth image view
     const VkImageViewCreateInfo image_view_create_info =
         vkinit::imageview_create_info(
-            depth_format, 
-            depth_image.image, 
+            context.depth_format,
+            context.depth_image.image,
             VK_IMAGE_ASPECT_DEPTH_BIT
         );
 
     VK_CHECK(vkCreateImageView(
-        device, 
+        context.device,
         &image_view_create_info, 
         nullptr, 
-        &depth_image_view)
+        &context.depth_image_view)
     );
 }
 
@@ -494,7 +558,7 @@ void Application::init_default_renderpass()
     // Color attachment
     const VkAttachmentDescription color_attachment = {
         .flags = 0,
-        .format = image_format,
+        .format = context.image_format,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -513,7 +577,7 @@ void Application::init_default_renderpass()
     const VkAttachmentDescription depth_attachment =
     {
         .flags = 0,
-        .format = depth_format,
+        .format = context.depth_format,
         .samples = VK_SAMPLE_COUNT_1_BIT,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -543,7 +607,7 @@ void Application::init_default_renderpass()
     };
 
     // Create dependencies for color and depth attachments
-    VkSubpassDependency color_dependency = {
+    const VkSubpassDependency color_dependency = {
         .srcSubpass = VK_SUBPASS_EXTERNAL,
         .dstSubpass = 0,
         .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -581,10 +645,10 @@ void Application::init_default_renderpass()
         .pDependencies = &dependencies.data()[0]
     };
     VK_CHECK(vkCreateRenderPass(
-        device, 
+        context.device,
         &render_pass_create_info, 
         nullptr, 
-        &render_pass)
+        &context.render_pass)
     );
 }
 
@@ -595,7 +659,7 @@ void Application::init_framebuffers()
     VkFramebufferCreateInfo fb_create_info = {
         .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
         .pNext = nullptr,
-        .renderPass = render_pass,
+        .renderPass = context.render_pass,
         .attachmentCount = 1,
         .width = window_extent.width,
         .height = window_extent.height,
@@ -603,24 +667,24 @@ void Application::init_framebuffers()
     };
 
     // Allocate memory for framebuffers based on how many images we have
-    const int swapchain_image_count = (int)swapchain_images.size();
-    framebuffers = std::vector<VkFramebuffer>(swapchain_image_count);
+    const int image_view_count = (int)context.swapchain_image_views.size();
+    context.framebuffers = std::vector<VkFramebuffer>(image_view_count);
 
-    std::array<VkImageView, 2> attachments;
+    std::array<VkImageView, 2> attachments = {};
     // Create framebuffers for each swapchain image view
-    for (int i = 0; i < swapchain_image_count; i++)
+    for (int i = 0; i < image_view_count; i++)
     {
-        attachments[0] = swapchain_image_views[i];
-        attachments[1] = depth_image_view;
+        attachments[0] = context.swapchain_image_views[i];
+        attachments[1] = context.depth_image_view;
 
         fb_create_info.attachmentCount = (uint32_t)attachments.size();
         fb_create_info.pAttachments = attachments.data();
 
         VK_CHECK(vkCreateFramebuffer(
-            device, 
+            context.device,
             &fb_create_info, 
             nullptr, 
-            &framebuffers[i])
+            &context.framebuffers[i])
         );
     }
 }
@@ -658,7 +722,7 @@ VkShaderModule Application::load_shader_module(const char* filename) const
 
     VkShaderModule shader_module;
     VK_CHECK(vkCreateShaderModule(
-        device, 
+        context.device,
         &shader_module_create_info,
         nullptr, 
         &shader_module)
@@ -667,61 +731,73 @@ VkShaderModule Application::load_shader_module(const char* filename) const
     return shader_module;
 }
 
-void Application::init_commands()
+void Application::init_per_frames()
 {
-    // Create a Vulkan command pool
     const VkCommandPoolCreateInfo command_pool_create_info =
-        vkinit::command_pool_create_info(
-            graphics_queue_index, 
-            VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
-        );
-    VK_CHECK(vkCreateCommandPool(
-        device, 
-        &command_pool_create_info,
-        nullptr, 
-        &command_pool)
-    );
+        vkinit::command_pool_create_info(context.graphics_queue_index,
+            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
-    // Allocate the main command buffer
-    const VkCommandBufferAllocateInfo command_buffer_allocate_info =
-        vkinit::command_buffer_allocate_info(command_pool, 1);
-    VK_CHECK(vkAllocateCommandBuffers(
-        device,
-        &command_buffer_allocate_info,
-        &main_command_buffer)
-    );
-}
-
-void Application::init_sync_objects()
-{
-    // Create a Vulkan fence
     const VkFenceCreateInfo fence_create_info = {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         .pNext = nullptr,
         .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
-    VK_CHECK(vkCreateFence(device, &fence_create_info, nullptr, &render_fence));
 
-    // Create semaphores for synchronizing the rendering and presenting pipeline
-    // stages
     const VkSemaphoreCreateInfo semaphore_create_info = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0
     };
-    VK_CHECK(vkCreateSemaphore(
-        device, 
-        &semaphore_create_info, 
-        nullptr, 
-        &render_semaphore)
-    );
-    VK_CHECK(vkCreateSemaphore(
-        device,
-        &semaphore_create_info,
-        nullptr,
-        &present_semaphore)
-    );
+
+    // For each swapchain image
+    for (PerFrame& frame : context.frames)
+    {
+        // Create a Vulkan command pool
+        VK_CHECK(vkCreateCommandPool(context.device, &command_pool_create_info,
+            nullptr, &frame.primary_command_pool));
+
+        // Allocate a command buffer from the pool
+        const VkCommandBufferAllocateInfo command_buffer_allocate_info =
+            vkinit::command_buffer_allocate_info(frame.primary_command_pool, 1);
+
+        VK_CHECK(vkAllocateCommandBuffers(context.device,
+            &command_buffer_allocate_info, &frame.primary_command_buffer));
+
+        // Create a Vulkan fence
+        VK_CHECK(vkCreateFence(context.device, &fence_create_info, nullptr,
+            &frame.queue_submit_fence));
+
+        // Create semaphores to synchornize acquiring images from the swapchain
+        VK_CHECK(vkCreateSemaphore(context.device, &semaphore_create_info,
+            nullptr, &frame.swapchain_acquire_semaphore));
+        VK_CHECK(vkCreateSemaphore(context.device, &semaphore_create_info,
+            nullptr, &frame.swapchain_release_semaphore));
+    }
 }
+
+//void Application::init_sync_objects()
+//{
+//
+//    // Create semaphores for synchronizing acquiring and releasing images from
+//    // the swapchain
+//    const VkSemaphoreCreateInfo semaphore_create_info = {
+//        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+//        .pNext = nullptr,
+//        .flags = 0
+//    };
+//    VK_CHECK(vkCreateSemaphore(
+//        context.device,
+//        &semaphore_create_info,
+//        nullptr,
+//        &context.per_frame.swapchain_acquire_semaphore)
+//    );
+//    VK_CHECK(vkCreateSemaphore(
+//        context.device,
+//        &semaphore_create_info, 
+//        nullptr, 
+//        &context.per_frame.swapchain_release_semaphore)
+//    );
+//}
 
 void Application::init_pipelines()
 {
@@ -758,10 +834,10 @@ void Application::init_pipelines()
 
     // Create pipeline layout
     VK_CHECK(vkCreatePipelineLayout(
-        device, 
+        context.device, 
         &layout_info, 
         nullptr, 
-        &pipeline_layout)
+        &context.pipeline_layout)
     );
 
     // Fill out the pipeline builder
@@ -778,12 +854,12 @@ void Application::init_pipelines()
         .blend_attachment = vkinit::color_blend_attachment_state(),
         .multisample = vkinit::multisample_state_create_info(),
         .depth_stencil = vkinit::depth_stencil_create_info(true, true, VK_COMPARE_OP_LESS_OR_EQUAL),
-        .pipeline_layout = pipeline_layout
+        .pipeline_layout = context.pipeline_layout
     };
 
     // Build the pipeline
     builder.shader_stages = shader_stages;
-    pipeline = builder.build_pipeline(device, render_pass);
+    context.pipeline = builder.build_pipeline(context.device, context.render_pass);
 
     // Cleanup pipeline resources
     pipe_cleanup(builder, shader_stages);
@@ -827,7 +903,7 @@ void Application::upload_model(std::unique_ptr<Model>& model)
 
     // Allocate memory for the vertex buffer
     VK_CHECK(vmaCreateBuffer(
-        allocator, 
+        context.allocator,
         &buffer_create_info,
         &alloc_create_info,
         &model->vertex_buffer.buffer,
@@ -837,17 +913,22 @@ void Application::upload_model(std::unique_ptr<Model>& model)
 
     // Map allocated memory to be accessible to the CPU
     void* vertex_data;
-    vmaMapMemory(allocator, model->vertex_buffer.allocation, &vertex_data);
+    vmaMapMemory(context.allocator, model->vertex_buffer.allocation, &vertex_data);
 
     // Copy the model vertex data to the allocated memory block
     const size_t buf_sz = model->vertices.size() * sizeof(Vertex);
     memcpy(vertex_data, model->vertices.data(), buf_sz);
 
     // Unmap the memory to release it back to the allocator
-    vmaUnmapMemory(allocator, model->vertex_buffer.allocation);
+    vmaUnmapMemory(context.allocator, model->vertex_buffer.allocation);
 
     // Add model to models in scene
     models.push_back(std::move(model));
+}
+
+PerFrame& Application::get_current_frame()
+{
+    return context.frames[current_frame % NUM_OVERLAPPING_FRAMES];
 }
 
 void Application::pipe_cleanup(
@@ -856,8 +937,16 @@ void Application::pipe_cleanup(
 ) const
 {
     // Destroy shader modules
-    vkDestroyShaderModule(device, builder.shader_stages[0].module, nullptr);
-    vkDestroyShaderModule(device, builder.shader_stages[1].module, nullptr);
+    vkDestroyShaderModule(
+        context.device, 
+        builder.shader_stages[0].module, 
+        nullptr
+    );
+    vkDestroyShaderModule(
+        context.device, 
+        builder.shader_stages[1].module, 
+        nullptr
+    );
 
     // Clear arrays
     builder.shader_stages.clear();
