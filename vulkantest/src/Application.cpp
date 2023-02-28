@@ -10,14 +10,15 @@
 #include <SDL2/SDL_vulkan.h>
 #include <vk-bootstrap/VkBootstrap.h>
 
+#include "Utils/string_ops.h"
+#include "VulkanRenderer/PipelineBuilder.h"
+#include "VulkanRenderer/vkinit.h"
+#include "VulkanRenderer/vkutils.h"
+
 #pragma warning(push, 0)
 #define VMA_IMPLEMENTATION
 #include <vma/vk_mem_alloc.h>
 #pragma warning(pop)
-
-#include "VulkanRenderer/PipelineBuilder.h"
-#include "VulkanRenderer/vkinit.h"
-#include "VulkanRenderer/vkutils.h"
 
 #ifdef NDEBUG
 const bool VALIDATION_LAYERS_ON = false;
@@ -27,26 +28,75 @@ const bool VALIDATION_LAYERS_ON = true;
 
 void Application::setup()
 {
+    // Load models into the scene
+    load_models();
+
+    // Initialize the camera
+    camera.position = glm::vec3(0.0f, 8.0f, 30.0f);
+    camera.aspect = (float)window->extent.width / (float)window->extent.height;
+    camera.set_projection();
 }
 
 void Application::input()
-{
-}
-
-void Application::update()
 {
     SDL_Event event;
 
     // Handling core SDL events (moving the mouse, closing the window, etc.)
     while (SDL_PollEvent(&event))
     {
-        // Closing the window
         switch (event.type)
         {
+            // Closing the window
             case SDL_QUIT:
             {
                 running = false;
                 break;
+            }
+            // Clicking the window
+            case SDL_MOUSEBUTTONDOWN:
+            {
+                if (event.button.button == SDL_BUTTON_RIGHT)
+                {
+                    window->clicked();
+                    camera.input_mode = INPUT_ENABLED;
+                    camera.window_clicked = true;
+                    break;
+                }
+                break;
+            }
+            case SDL_MOUSEBUTTONUP:
+            {
+                if (event.button.button == SDL_BUTTON_RIGHT)
+                {
+                    window->released();
+                    camera.input_mode = MOUSE_INPUT_DISABLED;
+                    camera.window_clicked = false;
+                    camera.mouse_has_position = false;
+                    break;
+                }
+                break;
+            }
+            //  Adjusting the camera speed with the mouse
+            case SDL_MOUSEWHEEL:
+            {
+                if (event.wheel.y > 0)
+                {
+                    camera.speed += camera.SPEED_INC;
+                    camera.speed = glm::clamp(
+                        camera.speed,
+                        camera.MIN_SPEED,
+                        camera.MAX_SPEED
+                    );
+                }
+                else if (event.wheel.y < 0)
+                {
+                    camera.speed -= camera.SPEED_INC;
+                    camera.speed = glm::clamp(
+                        camera.speed,
+                        camera.MIN_SPEED,
+                        camera.MAX_SPEED
+                    );
+                }
             }
             case SDL_KEYDOWN:
             {
@@ -55,18 +105,95 @@ void Application::update()
                     running = false;
                     break;
                 }
-                if (event.key.keysym.sym == SDLK_1)
+                /**
+                 * Camera controls
+                 * Note: The camera controls are handled by ORing together
+                 * different flags on the move state bitmask, which allows us to
+                 * easily handle multiple keypresses at once by simply setting
+                 * and removing bits from the mask
+                 */
+                if (event.key.keysym.sym == SDLK_w)
                 {
-                    render_mode = RAINBOW;
+                    camera.set_move_state(FORWARD, true);
                     break;
                 }
-                if (event.key.keysym.sym == SDLK_2)
+                if (event.key.keysym.sym == SDLK_s)
                 {
-                    render_mode = SOLID;
+                    camera.set_move_state(BACKWARD, true);
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_d)
+                {
+                    camera.set_move_state(RIGHT, true);
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_a)
+                {
+                    camera.set_move_state(LEFT, true);
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_q)
+                {
+                    camera.set_move_state(DOWN, true);
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_e)
+                {
+                    camera.set_move_state(UP, true);
+                    break;
+                }
+                break;
+            }
+            case SDL_KEYUP:
+            {
+                if (event.key.keysym.sym == SDLK_w)
+                {
+                    camera.set_move_state(FORWARD, false);
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_s)
+                {
+                    camera.set_move_state(BACKWARD, false);
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_d)
+                {
+                    camera.set_move_state(RIGHT, false);
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_a)
+                {
+                    camera.set_move_state(LEFT, false);
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_q)
+                {
+                    camera.set_move_state(DOWN, false);
+                    break;
+                }
+                if (event.key.keysym.sym == SDLK_e)
+                {
+                    camera.set_move_state(UP, false);
                     break;
                 }
             }
         }
+    }
+}
+
+void Application::update()
+{
+    camera.update();
+
+    for (const std::unique_ptr<Model>& model : models)
+    {
+        float rot = (float)current_frame * 0.005f;
+        model->rotation.y = rot;
+        model->update();
+
+        //std::cout << "Position: " + vec3_to_string(model->translation) << "\n";
+        //std::cout << "Rotation: " + vec3_to_string(model->rotation) << "\n";
+        //std::cout << "Scale: " + vec3_to_string(model->scale) << "\n";
     }
 }
 
@@ -133,7 +260,7 @@ void Application::render()
     VkClearValue depth_clear_value;
     depth_clear_value.depthStencil.depth = 1.0f;
 
-    std::array<VkClearValue, 2> clear_values = {
+    const std::array<VkClearValue, 2> clear_values = {
         color_clear_value, 
         depth_clear_value
     };
@@ -144,7 +271,7 @@ void Application::render()
         .pNext = nullptr,
         .renderPass = context.render_pass,
         .framebuffer = context.framebuffers[swapchain_image_index],
-        .renderArea = scissor,
+        .renderArea = window->scissor,
         .clearValueCount = (uint32_t)clear_values.size(),
         .pClearValues = &clear_values.data()[0]
     };
@@ -185,53 +312,9 @@ void Application::render()
             &offset
         );
 
-        // Create view matrix
-        const glm::vec3 camera_translation(0.0f, 0.0f, -5.0f);
-        const glm::vec3 target(0.0f);
-        const glm::vec3 world_up(0.0f, 1.0f, 0.0f);
-
-        const glm::mat4 view_matrix =
-            glm::lookAt(camera_translation, target, world_up);
-
-        // Create projection matrix
-        const float fov = glm::radians(60.0f);
-        const float aspect = (float)window_extent.width / (float)window_extent.height;
-        const float znear = 0.1f;
-        const float zfar = 1000.0f;
-
-        const glm::mat4 projection_matrix =
-            glm::perspective(fov, aspect, znear, zfar);
-
-        // Create model matrix
-        const float rot = (float)current_frame * 0.005f;
-
-        const glm::mat4 translation_matrix =
-            glm::translate(glm::mat4(1.0f), glm::vec3(0.0f));
-
-        const glm::mat4 rotation_x_matrix =
-            glm::rotate(glm::mat4(1.0f), rot, glm::vec3(1.0f, 0.0f, 0.0f));
-
-        const glm::mat4 rotation_y_matrix =
-            glm::rotate(glm::mat4(1.0f), rot, glm::vec3(0.0f, 1.0f, 0.0f));
-
-        const glm::mat4 rotation_z_matrix =
-            glm::rotate(glm::mat4(1.0f), rot, glm::vec3(0.0f, 0.0f, 1.0f));
-
-        const glm::mat4 scale_matrix =
-            glm::scale(glm::mat4(1.0f), glm::vec3(1.0f));
-
-        const glm::mat4 rotation_matrix = rotation_x_matrix 
-                                          * rotation_y_matrix 
-                                          * rotation_z_matrix;
-
-        const glm::mat4 model_matrix = translation_matrix 
-                                       * rotation_matrix 
-                                       * scale_matrix;
-
         // Create model-view-projection matrix
-        const glm::mat4 modelviewprojection = projection_matrix
-                                              * view_matrix 
-                                              * model_matrix;
+        const glm::mat4 modelviewprojection =
+            camera.matrices.vp_matrix * model->transform;
 
         // Upload MVP to GPU via push constants
         MeshPushConstants push_constants = {
@@ -296,21 +379,16 @@ void Application::initialize()
     // Initialize SDL
     if (SDL_Init(SDL_INIT_EVERYTHING) != 0)
     {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, window_name,
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, window->name,
             "Failed to initialize SDL.", nullptr);
         return;
     }
 
     // Create a window
-    window = SDL_CreateWindow(
-        window_name,
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        (int)window_extent.width, (int)window_extent.height,
-        SDL_WINDOW_VULKAN | SDL_WINDOW_BORDERLESS
-    );
-    if (!window)
+    window->init();
+    if (!window->window)
     {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, window_name,
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, window->name,
             "Failed to initialize SDL window.", nullptr);
         SDL_Quit();
         return;
@@ -326,9 +404,6 @@ void Application::initialize()
     //init_descriptors();
     //init_sync_objects();
     init_pipelines();
-
-    // Load models into the scene
-    load_models();
 
     // Everything is successfully initialized and the application is running
     running = true;
@@ -353,8 +428,7 @@ void Application::destroy()
     destroy_vulkan_resources();
 
     // Free SDL resources
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    window->destroy();
 }
 
 void Application::destroy_per_frames()
@@ -461,7 +535,7 @@ void Application::init_instance()
     context.debug_messenger = vkb_inst.debug_messenger;
 
     // Create a Vulkan surface to draw to
-    SDL_Vulkan_CreateSurface(window, context.instance, &context.surface);
+    SDL_Vulkan_CreateSurface(window->window, context.instance, &context.surface);
 
     // Select a GPU from the available physical devices
     vkb::PhysicalDeviceSelector selector(vkb_inst);
@@ -500,7 +574,7 @@ void Application::init_swapchain()
     builder.use_default_format_selection();
     builder.set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR); // use vsync
     builder.set_desired_min_image_count(vkb::SwapchainBuilder::TRIPLE_BUFFERING);
-    builder.set_desired_extent(window_extent.width, window_extent.height);
+    builder.set_desired_extent(window->extent.width, window->extent.height);
     vkb::Swapchain vkbSwapchain = builder.build().value();
 
     context.swapchain = vkbSwapchain.swapchain;
@@ -509,8 +583,8 @@ void Application::init_swapchain()
 
     // Configure the depth image
     const VkExtent3D depth_image_extent = {
-        .width = window_extent.width,
-        .height = window_extent.height,
+        .width = window->extent.width,
+        .height = window->extent.height,
         .depth = 1
     };
 
@@ -661,8 +735,8 @@ void Application::init_framebuffers()
         .pNext = nullptr,
         .renderPass = context.render_pass,
         .attachmentCount = 1,
-        .width = window_extent.width,
-        .height = window_extent.height,
+        .width = window->extent.width,
+        .height = window->extent.height,
         .layers = 1
     };
 
@@ -734,8 +808,8 @@ VkShaderModule Application::load_shader_module(const char* filename) const
 void Application::init_per_frames()
 {
     const VkCommandPoolCreateInfo command_pool_create_info =
-        vkinit::command_pool_create_info(context.graphics_queue_index,
-            VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+        vkinit::command_pool_create_info(
+            context.graphics_queue_index, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
     const VkFenceCreateInfo fence_create_info = {
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
@@ -846,10 +920,10 @@ void Application::init_pipelines()
         .vertex_input = vkinit::vertex_input_state_create_info(description),
         .input_assembly = vkinit::input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST),
         .viewport = { .x = 0.0f, .y = 0.0f,
-                      .width = (float)window_extent.width,
-                      .height = (float)window_extent.height,
+                      .width = (float)window->extent.width,
+                      .height = (float)window->extent.height,
                       .minDepth = 0.0f, .maxDepth = 1.0f },
-        .scissor = scissor,
+        .scissor = window->scissor,
         .raster = vkinit::rasterization_state_create_info(VK_POLYGON_MODE_FILL),
         .blend_attachment = vkinit::color_blend_attachment_state(),
         .multisample = vkinit::multisample_state_create_info(),
@@ -878,7 +952,7 @@ void Application::load_models()
     triangle.vertices[1].color = { 0.0f, 1.0f, 0.0f };
     triangle.vertices[2].color = { 0.0f, 0.0f, 1.0f };
 
-    cube = create_model("assets/models/cube/cube.obj");
+    std::unique_ptr<Model> cube = create_model("assets/models/koopa/koopa.obj");
 
     if (cube)
     {

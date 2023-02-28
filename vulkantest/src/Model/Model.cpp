@@ -5,8 +5,10 @@
 #include <iostream>
 
 #include <fast_obj/fast_obj.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "../Utils/Colors.h"
+#include "../Utils/string_ops.h"
 
 bool Model::load_from_obj(const char* filename)
 {
@@ -66,13 +68,46 @@ bool Model::load_from_obj(const char* filename)
     return true;
 }
 
-std::unique_ptr<Model> create_model(const char* filename)
+void Model::update()
+{
+    const glm::mat4 translation_matrix =
+        glm::translate(glm::mat4(1.0f), translation);
+
+    const glm::mat4 rotation_x_matrix =
+        glm::rotate(glm::mat4(1.0f), rotation.x, glm::vec3(1.0f, 0.0f, 0.0f));
+
+    const glm::mat4 rotation_y_matrix =
+        glm::rotate(glm::mat4(1.0f), rotation.y, glm::vec3(0.0f, 1.0f, 0.0f));
+
+    const glm::mat4 rotation_z_matrix =
+        glm::rotate(glm::mat4(1.0f), rotation.z, glm::vec3(0.0f, 0.0f, 1.0f));
+
+    const glm::mat4 scale_matrix = glm::scale(glm::mat4(1.0f), scale);
+
+    const glm::mat4 rotation_matrix =
+        rotation_x_matrix * rotation_y_matrix * rotation_z_matrix;
+
+    transform = translation_matrix * rotation_matrix * scale_matrix;
+}
+
+std::unique_ptr<Model> create_model(
+    const char* filename,
+    const glm::vec3& rotation,
+    const glm::vec3& scale,
+    const glm::vec3& translation
+)
 {
     std::unique_ptr<Model> model = std::make_unique<Model>();
     const bool success = model->load_from_obj(filename);
+
     if (!success)
     {
         return nullptr;
     }
+
+    model->rotation = rotation;
+    model->scale = scale;
+    model->translation = translation;
+
     return model;
 }

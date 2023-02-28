@@ -8,7 +8,9 @@
 #include <glm/vec4.hpp>
 #include <vulkan/vulkan_core.h>
 
+#include "Camera/Camera.h"
 #include "Model/Model.h"
+#include "Window/Window.h"
 
 constexpr int NUM_OVERLAPPING_FRAMES = 3;
 
@@ -135,13 +137,14 @@ struct Application
 
     void render();
 
-    SDL_Window* window = nullptr;
-    VkExtent2D window_extent = { 800, 600 };
-    VkRect2D scissor = { { 0, 0 }, window_extent };
-    const char* window_name = "Vulkan Renderer";
+    //SDL_Window* window = nullptr;
+    //VkExtent2D window_extent = { 800, 600 };
+    //VkRect2D scissor = { { 0, 0 }, window_extent };
+    //const char* window_name = "Vulkan Renderer";
+
+    std::unique_ptr<Window> window = std::make_unique<Window>();
 
     int current_frame = 0;
-    float target_seconds_per_frame = 0.0f;
     bool running = false;
 
     ERenderMode render_mode = SOLID;
@@ -186,7 +189,8 @@ struct Application
     PerFrame& get_current_frame();
 
     Model triangle = {};
-    std::unique_ptr<Model> cube = nullptr;
 
     std::vector<std::unique_ptr<Model>> models;
+
+    Camera camera;
 };

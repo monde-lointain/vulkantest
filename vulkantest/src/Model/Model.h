@@ -20,9 +20,19 @@ struct Model
     std::vector<Vertex> vertices;
     Buffer vertex_buffer;
     std::unique_ptr<Material> material;
+
+    glm::vec3 rotation = glm::vec3(0.0f);
+    glm::vec3 scale = glm::vec3(1.0f);
+    glm::vec3 translation = glm::vec3(0.0f);
     glm::mat4 transform;
 
-    bool load_from_obj(const char* filename);
+    bool load_from_obj(const char *filename);
+    void update();
 };
 
-std::unique_ptr<Model> create_model(const char* filename);
+std::unique_ptr<Model> create_model(
+    const char* filename,
+    const glm::vec3& rotation = glm::vec3(0.0f),
+    const glm::vec3& scale = glm::vec3(1.0f),
+    const glm::vec3& translation = glm::vec3(0.0f)
+);
