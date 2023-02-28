@@ -4,9 +4,6 @@
 
 struct CameraMatrices
 {
-	glm::mat4 view_matrix;
-	glm::mat4 projection_matrix;
-	glm::mat4 vp_matrix;
 };
 
 // Bitmask for combining movement directions together into a single int
@@ -51,7 +48,9 @@ public:
 	const float MIN_SPEED = 0.001f;
 	glm::vec3 forward = glm::vec3(0.0f);
 
-	CameraMatrices matrices;
+	glm::mat4 view_matrix;
+	glm::mat4 projection_matrix;
+	glm::mat4 vp_matrix;
 
 	EInputMode input_mode = MOUSE_INPUT_DISABLED;
 	bool window_clicked = false;

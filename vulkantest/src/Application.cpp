@@ -190,10 +190,6 @@ void Application::update()
         float rot = (float)current_frame * 0.005f;
         model->rotation.y = rot;
         model->update();
-
-        //std::cout << "Position: " + vec3_to_string(model->translation) << "\n";
-        //std::cout << "Rotation: " + vec3_to_string(model->rotation) << "\n";
-        //std::cout << "Scale: " + vec3_to_string(model->scale) << "\n";
     }
 }
 
@@ -202,6 +198,9 @@ constexpr uint64_t TIMEOUT_PERIOD = ONE_SECOND;
 
 void Application::render()
 {
+    // Get current frame data
+    const PerFrame& frame = get_current_frame();
+
     // Wait until the GPU has finished rendering, looping in case it takes
     // longer than expected
     VkResult result;
@@ -210,16 +209,12 @@ void Application::render()
         result = vkWaitForFences(
             context.device, 
             1, 
-            &get_current_frame().queue_submit_fence,
+            &frame.queue_submit_fence,
             true, 
             TIMEOUT_PERIOD
         );
     } while (result == VK_TIMEOUT);
-    VK_CHECK(vkResetFences(
-        context.device, 
-        1, 
-        &get_current_frame().queue_submit_fence)
-    );
+    VK_CHECK(vkResetFences(context.device, 1, &frame.queue_submit_fence));
 
     // Request an image from swapchain
     uint32_t swapchain_image_index;
@@ -227,17 +222,13 @@ void Application::render()
         context.device,
         context.swapchain,
         TIMEOUT_PERIOD,
-        get_current_frame().swapchain_acquire_semaphore,
+        frame.swapchain_acquire_semaphore,
         nullptr, 
         &swapchain_image_index)
     );
 
     // Clear all command buffers
-    VK_CHECK(vkResetCommandPool(
-        context.device, 
-        get_current_frame().primary_command_pool,
-        0)
-    );
+    VK_CHECK(vkResetCommandPool(context.device, frame.primary_command_pool, 0));
 
     // Start recording commands into the command buffer
     const VkCommandBufferBeginInfo cmd_buf_begin_info = {
@@ -247,7 +238,7 @@ void Application::render()
         .pInheritanceInfo = nullptr
     };
     VK_CHECK(vkBeginCommandBuffer(
-        get_current_frame().primary_command_buffer,
+        frame.primary_command_buffer,
         &cmd_buf_begin_info)
     );
 
@@ -276,68 +267,59 @@ void Application::render()
         .pClearValues = &clear_values.data()[0]
     };
     vkCmdBeginRenderPass(
-        get_current_frame().primary_command_buffer,
+        frame.primary_command_buffer,
         &render_pass_begin_info,
         VK_SUBPASS_CONTENTS_INLINE
     );
 
-    //// Choose a pipeline based on the render mode
-    //VkPipeline pipe = nullptr;
-    //switch (render_mode)
-    //{
-    //    case SOLID:
-    //        pipe = solid_pipe;
-    //        break;
-    //    case RAINBOW:
-    //        pipe = rainbow_pipe;
-    //        break;
-    //}
-
     // Bind pipeline to the command buffer
     vkCmdBindPipeline(
-        get_current_frame().primary_command_buffer,
+        frame.primary_command_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS, 
         context.pipeline
     );
 
-    for (const std::unique_ptr<Model>& model : models)
+    // Bind descriptor sets to pipeline
+    vkCmdBindDescriptorSets(
+        frame.primary_command_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS, 
+        context.pipeline_layout,
+        0, 
+        1, 
+        &frame.mvp_descriptor_set,
+        0, 
+        nullptr
+    );
+
+    // Loop over all models in the scene
+    for (const std::unique_ptr<Model> &model : models)
     {
         // Bind vertex buffer to the command buffer with an offset of zero
         const VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(
-            get_current_frame().primary_command_buffer,
-            0, 
-            1, 
-            &model->vertex_buffer.buffer, 
-            &offset
-        );
+        vkCmdBindVertexBuffers(frame.primary_command_buffer, 0, 1,
+            &model->vertex_buffer.buffer, &offset);
 
-        // Create model-view-projection matrix
+        // Create MVP matrix
         const glm::mat4 modelviewprojection =
-            camera.matrices.vp_matrix * model->transform;
+            camera.vp_matrix * model->transform;
 
-        // Upload MVP to GPU via push constants
-        MeshPushConstants push_constants = {
-            .modelviewprojection = modelviewprojection
-        };
+        // Copy MVP into the uniform buffer
+        void *data;
+        vmaMapMemory(
+            context.allocator, frame.mvp_uniform_buffer.allocation, &data);
 
-        vkCmdPushConstants(
-            get_current_frame().primary_command_buffer,
-            context.pipeline_layout,
-            VK_SHADER_STAGE_VERTEX_BIT, 
-            0, 
-            sizeof(MeshPushConstants),
-            &push_constants
-        );
+        memcpy(data, &modelviewprojection, sizeof(glm::mat4));
+
+        vmaUnmapMemory(context.allocator, frame.mvp_uniform_buffer.allocation);
 
         // Draw the model
-        vkCmdDraw(get_current_frame().primary_command_buffer,
+        vkCmdDraw(frame.primary_command_buffer,
             (uint32_t)model->vertices.size(), 1, 0, 0);
     }
 
     // Finalize render stage commands
-    vkCmdEndRenderPass(get_current_frame().primary_command_buffer);
-    VK_CHECK(vkEndCommandBuffer(get_current_frame().primary_command_buffer));
+    vkCmdEndRenderPass(frame.primary_command_buffer);
+    VK_CHECK(vkEndCommandBuffer(frame.primary_command_buffer));
 
     // Submit command buffer to the graphics queue
     const VkPipelineStageFlags wait_stage =
@@ -347,18 +329,18 @@ void Application::render()
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .pNext = nullptr,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &get_current_frame().swapchain_acquire_semaphore,
+        .pWaitSemaphores = &frame.swapchain_acquire_semaphore,
         .pWaitDstStageMask = &wait_stage,
         .commandBufferCount = 1,
-        .pCommandBuffers = &get_current_frame().primary_command_buffer,
+        .pCommandBuffers = &frame.primary_command_buffer,
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &get_current_frame().swapchain_release_semaphore
+        .pSignalSemaphores = &frame.swapchain_release_semaphore
     };
     VK_CHECK(vkQueueSubmit(
         context.queue, 
         1, 
         &submit_info, 
-        get_current_frame().queue_submit_fence)
+        frame.queue_submit_fence)
     );
 
     // Present image to the swap chain
@@ -366,7 +348,7 @@ void Application::render()
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .pNext = nullptr,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &get_current_frame().swapchain_release_semaphore,
+        .pWaitSemaphores = &frame.swapchain_release_semaphore,
         .swapchainCount = 1,
         .pSwapchains = &context.swapchain,
         .pImageIndices = &swapchain_image_index
@@ -401,7 +383,7 @@ void Application::initialize()
     init_default_renderpass();
     init_framebuffers();
     init_per_frames();
-    //init_descriptors();
+    init_descriptors();
     //init_sync_objects();
     init_pipelines();
 
@@ -454,6 +436,11 @@ void Application::destroy_per_frames()
             vkDestroyCommandPool(
                 context.device, frame.primary_command_pool, nullptr);
         }
+        if (frame.mvp_uniform_buffer.buffer)
+        {
+            vmaDestroyBuffer(context.allocator, frame.mvp_uniform_buffer.buffer,
+                frame.mvp_uniform_buffer.allocation);
+        }
     }
 }
 
@@ -464,8 +451,11 @@ void Application::destroy_vulkan_resources()
 
     for (const std::unique_ptr<Model> &model : models)
     {
-        vmaDestroyBuffer(context.allocator, model->vertex_buffer.buffer,
-            model->vertex_buffer.allocation);
+        if (model->vertex_buffer.buffer)
+        {
+            vmaDestroyBuffer(context.allocator, model->vertex_buffer.buffer,
+                model->vertex_buffer.allocation);
+        }
     }
     if (context.pipeline)
     {
@@ -475,6 +465,16 @@ void Application::destroy_vulkan_resources()
     {
         vkDestroyPipelineLayout(
             context.device, context.pipeline_layout, nullptr);
+    }
+    if (context.descriptor_set_layout)
+    {
+        vkDestroyDescriptorSetLayout(
+            context.device, context.descriptor_set_layout, nullptr);
+    }
+    if (context.descriptor_pool)
+    {
+        vkDestroyDescriptorPool(
+            context.device, context.descriptor_pool, nullptr);
     }
     destroy_per_frames();
     if (context.render_pass)
@@ -849,29 +849,92 @@ void Application::init_per_frames()
     }
 }
 
-//void Application::init_sync_objects()
-//{
-//
-//    // Create semaphores for synchronizing acquiring and releasing images from
-//    // the swapchain
-//    const VkSemaphoreCreateInfo semaphore_create_info = {
-//        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-//        .pNext = nullptr,
-//        .flags = 0
-//    };
-//    VK_CHECK(vkCreateSemaphore(
-//        context.device,
-//        &semaphore_create_info,
-//        nullptr,
-//        &context.per_frame.swapchain_acquire_semaphore)
-//    );
-//    VK_CHECK(vkCreateSemaphore(
-//        context.device,
-//        &semaphore_create_info, 
-//        nullptr, 
-//        &context.per_frame.swapchain_release_semaphore)
-//    );
-//}
+void Application::init_descriptors()
+{
+
+    // Create a descriptor set layout for the UBO
+    const VkDescriptorSetLayoutBinding layout_binding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+    };
+
+    const VkDescriptorSetLayoutCreateInfo layout_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &layout_binding
+    };
+
+    VK_CHECK(vkCreateDescriptorSetLayout(
+        context.device, 
+        &layout_info, 
+        nullptr, 
+        &context.descriptor_set_layout)
+    );
+
+    // Create a descriptor pool to allocate the descriptor sets
+    const VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = MAX_DESCRIPTOR_SETS
+    };
+
+    const VkDescriptorPoolCreateInfo descriptor_pool_create_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = MAX_DESCRIPTOR_SETS,
+        .poolSizeCount = 1,
+        .pPoolSizes = &pool_size
+    };
+
+    VK_CHECK(vkCreateDescriptorPool(
+        context.device, 
+        &descriptor_pool_create_info, 
+        nullptr, 
+        &context.descriptor_pool)
+    );
+
+    VkDescriptorSetAllocateInfo alloc_info;
+    VkDescriptorBufferInfo buffer_info;
+    VkWriteDescriptorSet descriptor_write;
+    for (PerFrame& frame : context.frames)
+    {
+        // Create a uniform buffer object
+        frame.mvp_uniform_buffer = create_buffer(sizeof(glm::mat4),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+        // Allocate a descriptor set
+        alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = context.descriptor_pool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &context.descriptor_set_layout
+        };
+        VK_CHECK(vkAllocateDescriptorSets(
+            context.device, 
+            &alloc_info, 
+            &frame.mvp_descriptor_set)
+        );
+
+        // Bind uniform buffer object to the descriptor set
+        buffer_info = {
+            .buffer = frame.mvp_uniform_buffer.buffer,
+            .offset = 0,
+            .range = sizeof(glm::mat4)
+        };
+
+        descriptor_write = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = frame.mvp_descriptor_set,
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .pBufferInfo = &buffer_info
+        };
+
+        vkUpdateDescriptorSets(
+            context.device, 1, &descriptor_write, 0, nullptr);
+    }
+}
 
 void Application::init_pipelines()
 {
@@ -897,14 +960,9 @@ void Application::init_pipelines()
     // Fill pipeline layout struct
     VkPipelineLayoutCreateInfo layout_info = vkinit::pipeline_layout_create_info();
 
-    // Specify model push constants
-    const VkPushConstantRange push_constant = {
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-        .offset = 0,
-        .size = sizeof(MeshPushConstants)
-    };
-    layout_info.pPushConstantRanges = &push_constant;
-    layout_info.pushConstantRangeCount = 1;
+    // Specify descriptor set layout
+    layout_info.setLayoutCount = 1;
+    layout_info.pSetLayouts = &context.descriptor_set_layout;
 
     // Create pipeline layout
     VK_CHECK(vkCreatePipelineLayout(
@@ -959,6 +1017,39 @@ void Application::load_models()
         upload_model(cube);
     }
 }
+
+Buffer Application::create_buffer(
+    size_t alloc_size,
+    VkBufferUsageFlags usage,
+    VmaMemoryUsage memory_usage
+) const
+{
+    // Specify info about the buffer to create
+    const VkBufferCreateInfo buffer_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .pNext = nullptr,
+        .size = alloc_size,
+        .usage = usage
+    };
+
+    // Set allocation properties for the buffer
+    const VmaAllocationCreateInfo alloc_info = { .usage = memory_usage };
+
+    Buffer buffer;
+
+    // Allocate memory for the buffer
+    VK_CHECK(vmaCreateBuffer(
+        context.allocator, 
+        &buffer_info, 
+        &alloc_info,
+        &buffer.buffer, 
+        &buffer.allocation, 
+        nullptr)
+    );
+
+    return buffer;
+}
+
 
 void Application::upload_model(std::unique_ptr<Model>& model)
 {

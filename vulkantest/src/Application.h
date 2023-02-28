@@ -13,6 +13,7 @@
 #include "Window/Window.h"
 
 constexpr int NUM_OVERLAPPING_FRAMES = 3;
+constexpr int MAX_DESCRIPTOR_SETS = 10;
 
 struct MeshPushConstants
 {
@@ -24,10 +25,18 @@ struct MeshPushConstants
 struct PerFrame
 {
     VkFence queue_submit_fence = nullptr;
+
     VkCommandPool primary_command_pool = nullptr;
+
     VkCommandBuffer primary_command_buffer = nullptr;
+
     VkSemaphore swapchain_acquire_semaphore = nullptr;
+
     VkSemaphore swapchain_release_semaphore = nullptr;
+
+    Buffer mvp_uniform_buffer = {};
+
+    VkDescriptorSet mvp_descriptor_set = nullptr;
 };
 
 /** Vulkan objects and global state */
@@ -110,6 +119,15 @@ struct Context
 
     /** Per-frame data. */
     std::array<PerFrame, NUM_OVERLAPPING_FRAMES> frames;
+
+    /** Describes the layout of a descriptor set. */
+    VkDescriptorSetLayout descriptor_set_layout = nullptr;
+
+    /**
+     * A pool of descriptor sets, which are allocated by the application at
+     * runtime.
+     */
+    VkDescriptorPool descriptor_pool = nullptr;
 };
 
 enum ERenderMode
@@ -163,8 +181,6 @@ struct Application
 
     void init_per_frames();
 
-    //void init_sync_objects();
-
     void init_pipelines();
 
     void pipe_cleanup(
@@ -174,7 +190,7 @@ struct Application
 
     //void init_scene();
 
-    //void init_descriptors();
+    void init_descriptors();
 
     void destroy_vulkan_resources();
 
@@ -183,6 +199,12 @@ struct Application
     Context context;
 
     void load_models();
+
+    Buffer create_buffer(
+        size_t alloc_size, 
+        VkBufferUsageFlags usage,
+        VmaMemoryUsage memory_usage
+    ) const;
 
     void upload_model(std::unique_ptr<Model>& model);
 

@@ -22,7 +22,7 @@ void Camera::set_move_state(EMovementState state, bool set)
 
 void Camera::set_projection()
 {
-    matrices.projection_matrix =
+    projection_matrix =
         glm::perspective(glm::radians(fov), aspect, znear, zfar);
 
     // Correction matrix for Vulkan's coordinate system (Vulkan has flipped y
@@ -32,23 +32,23 @@ void Camera::set_projection()
                          0.0f,  0.0f, 0.5f, 0.0f, 
                          0.0f,  0.0f, 0.5f, 1.0f);
 
-    matrices.projection_matrix = clip * matrices.projection_matrix;
+    projection_matrix = clip * projection_matrix;
 }
 
 void Camera::set_view()
 {
     const glm::vec3 target = position + forward;
-    matrices.view_matrix = glm::lookAt(position, target, world_up);
+    view_matrix = glm::lookAt(position, target, world_up);
 
     // Concatenate view and projection matrices
-    matrices.vp_matrix = matrices.projection_matrix * matrices.view_matrix;
+    vp_matrix = projection_matrix * view_matrix;
 }
 
 void Camera::update_camera_vectors()
 {
     const float pitch = glm::radians(rotation.x);
     const float yaw = glm::radians(rotation.y);
-    glm::vec3 front(
+    const glm::vec3 front(
         cosf(yaw) * cosf(pitch),
         sinf(pitch),
         sinf(yaw) * cosf(pitch)

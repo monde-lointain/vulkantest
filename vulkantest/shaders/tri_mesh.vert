@@ -7,14 +7,13 @@ layout (location = 3) in vec3 color;
 
 layout (location = 0) out vec3 out_color;
 
-layout (push_constant) uniform push_constants
+layout(set = 0, binding = 0) uniform ubo
 {
-    vec4 data;
     mat4 modelviewprojection;
-} pc;
+} mvp;
 
 void main()
 {
-    gl_Position = pc.modelviewprojection * vec4(position, 1.0f);
+    gl_Position = mvp.modelviewprojection * vec4(position, 1.0f);
     out_color = color;
 }
