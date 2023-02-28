@@ -240,6 +240,8 @@
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\VulkanRenderer\DeletionQueue.cpp" />
+    <ClCompile Include="src\Scene\Scene.cpp" />
     <ClCompile Include="src\Camera\Camera.cpp" />
     <ClCompile Include="libs\imgui\imgui.cpp" />
     <ClCompile Include="libs\imgui\imgui_demo.cpp" />
@@ -263,6 +265,8 @@
     <None Include="shaders\trivert.glsl" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\VulkanRenderer\DeletionQueue.h" />
+    <ClInclude Include="src\Scene\Scene.h" />
     <ClInclude Include="src\Camera\Camera.h" />
     <ClInclude Include="libs\fast_obj\fast_obj.h" />
     <ClInclude Include="libs\imgui\imconfig.h" />

@@ -219,3 +219,41 @@ vkinit::depth_stencil_create_info(
     };
     return depth_stencil;
 }
+
+VkDescriptorSetLayoutBinding
+vkinit::descriptorset_layout_binding(
+    VkDescriptorType type, 
+    VkShaderStageFlags flags,
+    uint32_t binding
+)
+{
+    const VkDescriptorSetLayoutBinding layout_binding = {
+        .binding = binding,
+        .descriptorType = type,
+        .descriptorCount = 1,
+        .stageFlags = flags,
+        .pImmutableSamplers = nullptr,
+    };
+    return layout_binding;
+}
+
+VkWriteDescriptorSet
+vkinit::write_descriptor_buffer(
+    VkDescriptorType type,
+    VkDescriptorSet set, 
+    VkDescriptorBufferInfo 
+    *buffer_info, 
+    uint32_t binding
+)
+{
+
+    const VkWriteDescriptorSet descriptor_write = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = set,
+        .dstBinding = binding,
+        .descriptorCount = 1,
+        .descriptorType = type,
+        .pBufferInfo = buffer_info
+    };
+    return descriptor_write;
+}

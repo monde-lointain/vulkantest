@@ -71,4 +71,19 @@ namespace vkinit
         bool should_depth_write,
         VkCompareOp compare_op
     );
+
+    VkDescriptorSetLayoutBinding
+    descriptorset_layout_binding(
+        VkDescriptorType type,
+        VkShaderStageFlags flags,
+        uint32_t binding
+    );
+
+    VkWriteDescriptorSet
+    write_descriptor_buffer(
+        VkDescriptorType type,
+        VkDescriptorSet set, 
+        VkDescriptorBufferInfo* buffer_info,
+        uint32_t binding
+    );
 };	  // namespace vkinit

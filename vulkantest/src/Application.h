@@ -10,6 +10,8 @@
 
 #include "Camera/Camera.h"
 #include "Model/Model.h"
+#include "Scene/Scene.h"
+#include "VulkanRenderer/DeletionQueue.h"
 #include "Window/Window.h"
 
 constexpr int NUM_OVERLAPPING_FRAMES = 3;
@@ -36,7 +38,7 @@ struct PerFrame
 
     Buffer mvp_uniform_buffer = {};
 
-    VkDescriptorSet mvp_descriptor_set = nullptr;
+    VkDescriptorSet global_descriptor_set = nullptr;
 };
 
 /** Vulkan objects and global state */
@@ -56,6 +58,7 @@ struct Context
 
     /** The Vulkan physical device. Represents an actual GPU on the system. */
     VkPhysicalDevice gpu = nullptr;
+    VkPhysicalDeviceProperties gpu_properties;
 
     /**
      * The Vulkan device. Used for allocating resources and executing commands
@@ -128,6 +131,13 @@ struct Context
      * runtime.
      */
     VkDescriptorPool descriptor_pool = nullptr;
+
+    /**
+     * Scene data and buffer. Contains parameters for the scene environent such
+     * as fog and sunlight
+     */
+    Scene scene_data;
+    Buffer scene_data_buffer;
 };
 
 enum ERenderMode
@@ -155,10 +165,10 @@ struct Application
 
     void render();
 
-    //SDL_Window* window = nullptr;
-    //VkExtent2D window_extent = { 800, 600 };
-    //VkRect2D scissor = { { 0, 0 }, window_extent };
-    //const char* window_name = "Vulkan Renderer";
+    // SDL_Window* window = nullptr;
+    // VkExtent2D window_extent = { 800, 600 };
+    // VkRect2D scissor = { { 0, 0 }, window_extent };
+    // const char* window_name = "Vulkan Renderer";
 
     std::unique_ptr<Window> window = std::make_unique<Window>();
 
@@ -177,42 +187,41 @@ struct Application
 
     void init_framebuffers();
 
-    VkShaderModule load_shader_module(const char* filename) const;
+    VkShaderModule load_shader_module(const char *filename) const;
 
     void init_per_frames();
 
     void init_pipelines();
 
-    void pipe_cleanup(
-        PipelineBuilder& builder, 
-        std::vector<VkPipelineShaderStageCreateInfo>& shader_stages
-    ) const;
+    void pipe_cleanup(PipelineBuilder &builder,
+        std::vector<VkPipelineShaderStageCreateInfo> &shader_stages) const;
 
-    //void init_scene();
+    // void init_scene();
 
     void init_descriptors();
 
     void destroy_vulkan_resources();
 
-    void destroy_per_frames();
+    //void destroy_per_frames();
 
     Context context;
 
+    DeletionQueue deletion_queue;
+
     void load_models();
 
-    Buffer create_buffer(
-        size_t alloc_size, 
-        VkBufferUsageFlags usage,
-        VmaMemoryUsage memory_usage
-    ) const;
+    [[nodiscard]] Buffer create_buffer(size_t alloc_size,
+        VkBufferUsageFlags usage, VmaMemoryUsage memory_usage) const;
 
-    void upload_model(std::unique_ptr<Model>& model);
+    void upload_model(std::unique_ptr<Model> &model);
 
-    PerFrame& get_current_frame();
+    PerFrame &get_current_frame();
 
     Model triangle = {};
 
     std::vector<std::unique_ptr<Model>> models;
 
     Camera camera;
+
+    size_t pad_uniform_buffer_size(size_t size);
 };

@@ -176,6 +176,7 @@ void Application::input()
                     camera.set_move_state(UP, false);
                     break;
                 }
+                break;
             }
         }
     }
@@ -280,16 +281,40 @@ void Application::render()
     );
 
     // Bind descriptor sets to pipeline
+    const int frame_index = current_frame % NUM_OVERLAPPING_FRAMES;
+    const uint32_t uniform_offset =
+        (uint32_t)pad_uniform_buffer_size(sizeof(Scene)) * frame_index;
+
     vkCmdBindDescriptorSets(
         frame.primary_command_buffer,
         VK_PIPELINE_BIND_POINT_GRAPHICS, 
         context.pipeline_layout,
         0, 
         1, 
-        &frame.mvp_descriptor_set,
-        0, 
-        nullptr
+        &frame.global_descriptor_set,
+        1, 
+        &uniform_offset
     );
+
+    // Test code that changes the ambient color
+    const float frame_delta = (float)current_frame / 120.0f;
+
+    context.scene_data.ambient_color = {
+        sinf(frame_delta), 0.0f, cosf(frame_delta), 1.0f
+    };
+
+    char* scene_data;
+    vmaMapMemory(
+        context.allocator, 
+        context.scene_data_buffer.allocation,
+        reinterpret_cast<void **>(&scene_data)
+    );
+
+    scene_data += uniform_offset;
+
+    memcpy(scene_data, &context.scene_data, sizeof(Scene));
+
+    vmaUnmapMemory(context.allocator, context.scene_data_buffer.allocation);
 
     // Loop over all models in the scene
     for (const std::unique_ptr<Model> &model : models)
@@ -413,37 +438,6 @@ void Application::destroy()
     window->destroy();
 }
 
-void Application::destroy_per_frames()
-{
-    for (const PerFrame &frame : context.frames)
-    {
-        if (frame.swapchain_acquire_semaphore)
-        {
-            vkDestroySemaphore(
-                context.device, frame.swapchain_acquire_semaphore, nullptr);
-        }
-        if (frame.swapchain_release_semaphore)
-        {
-            vkDestroySemaphore(
-                context.device, frame.swapchain_release_semaphore, nullptr);
-        }
-        if (frame.queue_submit_fence)
-        {
-            vkDestroyFence(context.device, frame.queue_submit_fence, nullptr);
-        }
-        if (frame.primary_command_pool)
-        {
-            vkDestroyCommandPool(
-                context.device, frame.primary_command_pool, nullptr);
-        }
-        if (frame.mvp_uniform_buffer.buffer)
-        {
-            vmaDestroyBuffer(context.allocator, frame.mvp_uniform_buffer.buffer,
-                frame.mvp_uniform_buffer.allocation);
-        }
-    }
-}
-
 void Application::destroy_vulkan_resources()
 {
     // Wait until the GPU is completely idle
@@ -457,53 +451,7 @@ void Application::destroy_vulkan_resources()
                 model->vertex_buffer.allocation);
         }
     }
-    if (context.pipeline)
-    {
-        vkDestroyPipeline(context.device, context.pipeline, nullptr);
-    }
-    if (context.pipeline_layout)
-    {
-        vkDestroyPipelineLayout(
-            context.device, context.pipeline_layout, nullptr);
-    }
-    if (context.descriptor_set_layout)
-    {
-        vkDestroyDescriptorSetLayout(
-            context.device, context.descriptor_set_layout, nullptr);
-    }
-    if (context.descriptor_pool)
-    {
-        vkDestroyDescriptorPool(
-            context.device, context.descriptor_pool, nullptr);
-    }
-    destroy_per_frames();
-    if (context.render_pass)
-    {
-        vkDestroyRenderPass(context.device, context.render_pass, nullptr);
-    }
-    if (context.depth_image_view)
-    {
-        vkDestroyImageView(context.device, context.depth_image_view, nullptr);
-    }
-    if (context.depth_image.allocation)
-    {
-        vmaDestroyImage(context.allocator, context.depth_image.image,
-            context.depth_image.allocation);
-    }
-    if (context.swapchain)
-    {
-        vkDestroySwapchainKHR(context.device, context.swapchain, nullptr);
-    }
-    for (size_t i = 0; i < context.framebuffers.size(); i++)
-    {
-        vkDestroyFramebuffer(context.device, context.framebuffers[i], nullptr);
-        vkDestroyImageView(
-            context.device, context.swapchain_image_views[i], nullptr);
-    }
-    if (context.allocator)
-    {
-        vmaDestroyAllocator(context.allocator);
-    }
+    deletion_queue.flush();
     if (context.surface)
     {
         vkDestroySurfaceKHR(context.instance, context.surface, nullptr);
@@ -551,6 +499,12 @@ void Application::init_instance()
 
     context.device = vkb_device.device;
 
+    context.gpu_properties = vkb_device.physical_device.properties;
+
+    std::cout << "GPU minimum buffer alignment: "
+              << context.gpu_properties.limits.minUniformBufferOffsetAlignment
+              << "\n";
+
     // Get graphics queue attributes
     context.queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
     context.graphics_queue_index =
@@ -565,6 +519,8 @@ void Application::init_allocator()
         .instance = context.instance
     };
     VK_CHECK(vmaCreateAllocator(&allocator_create_info, &context.allocator));
+
+    deletion_queue.push([&]() { vmaDestroyAllocator(context.allocator); });
 }
 
 void Application::init_swapchain()
@@ -580,6 +536,10 @@ void Application::init_swapchain()
     context.swapchain = vkbSwapchain.swapchain;
     context.image_format = vkbSwapchain.image_format;
     context.swapchain_image_views = vkbSwapchain.get_image_views().value();
+
+    deletion_queue.push([=]()
+        { vkDestroySwapchainKHR(context.device, context.swapchain, nullptr); }
+    );
 
     // Configure the depth image
     const VkExtent3D depth_image_extent = {
@@ -623,6 +583,16 @@ void Application::init_swapchain()
         &image_view_create_info, 
         nullptr, 
         &context.depth_image_view)
+    );
+
+    deletion_queue.push(
+        [=]()
+        {
+            vkDestroyImageView(
+                context.device, context.depth_image_view, nullptr);
+            vmaDestroyImage(context.allocator, context.depth_image.image,
+                context.depth_image.allocation);
+        }
     );
 }
 
@@ -724,6 +694,10 @@ void Application::init_default_renderpass()
         nullptr, 
         &context.render_pass)
     );
+
+    deletion_queue.push([=]()
+        { vkDestroyRenderPass(context.device, context.render_pass, nullptr); }
+    );
 }
 
 void Application::init_framebuffers()
@@ -759,6 +733,17 @@ void Application::init_framebuffers()
             &fb_create_info, 
             nullptr, 
             &context.framebuffers[i])
+        );
+
+
+        deletion_queue.push(
+            [=]()
+            {
+                vkDestroyFramebuffer(
+                    context.device, context.framebuffers[i], nullptr);
+                vkDestroyImageView(
+                    context.device, context.swapchain_image_views[i], nullptr);
+            }
         );
     }
 }
@@ -846,24 +831,67 @@ void Application::init_per_frames()
             nullptr, &frame.swapchain_acquire_semaphore));
         VK_CHECK(vkCreateSemaphore(context.device, &semaphore_create_info,
             nullptr, &frame.swapchain_release_semaphore));
+
+        deletion_queue.push(
+            [=]()
+            {
+                vkDestroyCommandPool(
+                    context.device, frame.primary_command_pool, nullptr);
+                vkDestroyFence(
+                    context.device, frame.queue_submit_fence, nullptr);
+                vkDestroySemaphore(
+                    context.device, frame.swapchain_acquire_semaphore, nullptr);
+                vkDestroySemaphore(
+                    context.device, frame.swapchain_release_semaphore, nullptr);
+            }
+        );
     }
 }
 
 void Application::init_descriptors()
 {
+    // Create a descriptor pool to allocate the descriptor sets
+    std::vector<VkDescriptorPoolSize> pool_sizes = {
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_DESCRIPTOR_SETS },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, MAX_DESCRIPTOR_SETS },
+    };
 
-    // Create a descriptor set layout for the UBO
-    const VkDescriptorSetLayoutBinding layout_binding = {
-        .binding = 0,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = 1,
-        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+    const VkDescriptorPoolCreateInfo descriptor_pool_create_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = 0,
+        .maxSets = MAX_DESCRIPTOR_SETS,
+        .poolSizeCount = (uint32_t)pool_sizes.size(),
+        .pPoolSizes = pool_sizes.data()
+    };
+
+    VK_CHECK(vkCreateDescriptorPool(
+        context.device,
+        &descriptor_pool_create_info,
+        nullptr,
+        &context.descriptor_pool)
+    );
+
+    // Create descriptor set layouts for the uniform buffer objects
+    const VkDescriptorSetLayoutBinding mvp_binding =
+        vkinit::descriptorset_layout_binding(
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
+
+    const VkDescriptorSetLayoutBinding scene_binding =
+        vkinit::descriptorset_layout_binding(
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 1);
+
+    const std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
+        mvp_binding,
+        scene_binding
     };
 
     const VkDescriptorSetLayoutCreateInfo layout_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 1,
-        .pBindings = &layout_binding
+        .pNext = nullptr,
+        .flags = 0,
+        .bindingCount = 2,
+        .pBindings = bindings.data()
     };
 
     VK_CHECK(vkCreateDescriptorSetLayout(
@@ -873,33 +901,29 @@ void Application::init_descriptors()
         &context.descriptor_set_layout)
     );
 
-    // Create a descriptor pool to allocate the descriptor sets
-    const VkDescriptorPoolSize pool_size = {
-        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .descriptorCount = MAX_DESCRIPTOR_SETS
-    };
+    // Create scene UBO
+    const size_t scene_buffer_size =
+        NUM_OVERLAPPING_FRAMES * pad_uniform_buffer_size(sizeof(Scene));
 
-    const VkDescriptorPoolCreateInfo descriptor_pool_create_info = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .maxSets = MAX_DESCRIPTOR_SETS,
-        .poolSizeCount = 1,
-        .pPoolSizes = &pool_size
-    };
-
-    VK_CHECK(vkCreateDescriptorPool(
-        context.device, 
-        &descriptor_pool_create_info, 
-        nullptr, 
-        &context.descriptor_pool)
+    context.scene_data_buffer = create_buffer(
+        scene_buffer_size,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, 
+        VMA_MEMORY_USAGE_CPU_TO_GPU
     );
 
+    VkDescriptorBufferInfo scene_buffer_info = {
+        .buffer = context.scene_data_buffer.buffer,
+        .offset = 0,
+        .range = sizeof(Scene)
+    };
+
     VkDescriptorSetAllocateInfo alloc_info;
-    VkDescriptorBufferInfo buffer_info;
-    VkWriteDescriptorSet descriptor_write;
-    for (PerFrame& frame : context.frames)
+    VkDescriptorBufferInfo mvp_buffer_info;
+    std::array<VkWriteDescriptorSet, 2> descriptor_writes;
+    for (int i = 0; i < NUM_OVERLAPPING_FRAMES; i++)
     {
-        // Create a uniform buffer object
-        frame.mvp_uniform_buffer = create_buffer(sizeof(glm::mat4),
+        // Create frame UBO
+        context.frames[i].mvp_uniform_buffer = create_buffer(sizeof(glm::mat4),
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
         // Allocate a descriptor set
@@ -911,29 +935,47 @@ void Application::init_descriptors()
         };
         VK_CHECK(vkAllocateDescriptorSets(
             context.device, 
-            &alloc_info, 
-            &frame.mvp_descriptor_set)
+            &alloc_info,
+            &context.frames[i].global_descriptor_set)
         );
 
-        // Bind uniform buffer object to the descriptor set
-        buffer_info = {
-            .buffer = frame.mvp_uniform_buffer.buffer,
+        // Bind uniform buffer objects to the descriptor set
+        mvp_buffer_info = {
+            .buffer = context.frames[i].mvp_uniform_buffer.buffer,
             .offset = 0,
             .range = sizeof(glm::mat4)
         };
 
-        descriptor_write = {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = frame.mvp_descriptor_set,
-            .dstBinding = 0,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .pBufferInfo = &buffer_info
+        descriptor_writes = {
+            vkinit::write_descriptor_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                context.frames[i].global_descriptor_set, &mvp_buffer_info, 0),
+            vkinit::write_descriptor_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                context.frames[i].global_descriptor_set, &scene_buffer_info, 1)
         };
 
         vkUpdateDescriptorSets(
-            context.device, 1, &descriptor_write, 0, nullptr);
+            context.device, 2, descriptor_writes.data(), 0, nullptr);
     }
+
+    deletion_queue.push(
+        [&]()
+        {
+            vmaDestroyBuffer(context.allocator,
+                context.scene_data_buffer.buffer,
+                context.scene_data_buffer.allocation);
+            vkDestroyDescriptorSetLayout(
+                context.device, context.descriptor_set_layout, nullptr);
+            vkDestroyDescriptorPool(
+                context.device, context.descriptor_pool, nullptr);
+
+            for (const PerFrame &frame : context.frames)
+            {
+                vmaDestroyBuffer(context.allocator,
+                    frame.mvp_uniform_buffer.buffer,
+                    frame.mvp_uniform_buffer.allocation);
+            }
+        }
+    );
 }
 
 void Application::init_pipelines()
@@ -950,7 +992,7 @@ void Application::init_pipelines()
     shader_stages.push_back(stage);
 
     // Fragment stage
-    module = load_shader_module("shaders/spirv/tri_frag.spv");
+    module = load_shader_module("shaders/spirv/default_lit.spv");
     stage = vkinit::shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, module);
     shader_stages.push_back(stage);
 
@@ -995,6 +1037,15 @@ void Application::init_pipelines()
 
     // Cleanup pipeline resources
     pipe_cleanup(builder, shader_stages);
+
+    deletion_queue.push(
+        [=]()
+        {
+            vkDestroyPipeline(context.device, context.pipeline, nullptr);
+            vkDestroyPipelineLayout(
+                context.device, context.pipeline_layout, nullptr);
+        }
+    );
 }
 
 void Application::load_models()
@@ -1116,4 +1167,20 @@ void Application::pipe_cleanup(
     // Clear arrays
     builder.shader_stages.clear();
     shader_stages.clear();
+}
+
+size_t Application::pad_uniform_buffer_size(size_t size)
+{
+    size_t min_alignment =
+        context.gpu_properties.limits.minUniformBufferOffsetAlignment;
+
+    size_t aligned_size = size;
+
+    if (min_alignment > 0)
+    {
+        aligned_size =
+            (aligned_size + min_alignment - 1) & ~(min_alignment - 1);
+    }
+
+    return aligned_size;
 }
