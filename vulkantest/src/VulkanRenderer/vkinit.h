@@ -93,5 +93,5 @@ namespace vkinit
     VkCommandBufferBeginInfo
     command_buffer_begin_info(VkCommandBufferUsageFlags flags);
 
-    VkSubmitInfo vkinit::submit_info(VkCommandBuffer* command_buffer);
+    VkSubmitInfo submit_info(VkCommandBuffer* command_buffer);
 };	  // namespace vkinit

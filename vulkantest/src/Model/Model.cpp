@@ -90,14 +90,14 @@ void Model::update()
     transform = translation_matrix * rotation_matrix * scale_matrix;
 }
 
-std::unique_ptr<Model> create_model(
+std::shared_ptr<Model> create_model(
     const char* filename,
     const glm::vec3& rotation,
     const glm::vec3& scale,
     const glm::vec3& translation
 )
 {
-    std::unique_ptr<Model> model = std::make_unique<Model>();
+    std::shared_ptr<Model> model = std::make_shared<Model>();
     const bool success = model->load_from_obj(filename);
 
     if (!success)

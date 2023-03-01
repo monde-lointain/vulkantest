@@ -186,7 +186,7 @@ void Application::update()
 {
     camera.update();
 
-    for (const std::unique_ptr<Model>& model : models)
+    for (const std::shared_ptr<Model>& model : models)
     {
         float rot = (float)current_frame * 0.005f;
         model->rotation.y = rot;
@@ -481,7 +481,7 @@ void Application::destroy_vulkan_resources()
     // Wait until the GPU is completely idle
     vkDeviceWaitIdle(context.device);
 
-    for (const std::unique_ptr<Model> &model : models)
+    for (const std::shared_ptr<Model> &model : models)
     {
         if (model->vertex_buffer.buffer)
         {
@@ -1194,12 +1194,12 @@ void Application::load_models()
     triangle.vertices[1].color = { 0.0f, 1.0f, 0.0f };
     triangle.vertices[2].color = { 0.0f, 0.0f, 1.0f };
 
-    std::unique_ptr<Model> cube = create_model("assets/models/koopa/koopa.obj");
+    std::shared_ptr<Model> koopa = create_model("assets/models/koopa/koopa.obj");
 
-    std::unique_ptr<Model> robot = create_model("assets/models/robot/robot.obj");
+    std::shared_ptr<Model> robot = create_model("assets/models/robot/robot.obj");
     robot->translation = glm::vec3(0.0f, 30.0f, 0.0f);
 
-    upload_model(cube);
+    upload_model(koopa);
     upload_model(robot);
 }
 
@@ -1236,27 +1236,61 @@ Buffer Application::create_buffer(
 }
 
 
-void Application::upload_model(std::unique_ptr<Model>& model)
+void Application::upload_model(std::shared_ptr<Model>& model)
 {
     if (!model)
     {
         return;
     }
 
-    // Specify info about the vertex buffer to create
-    const VkBufferCreateInfo buffer_create_info = {
+    // Copy the model vertex data to the allocated memory block
+    const size_t buf_sz = model->vertices.size() * sizeof(Vertex);
+
+    // Create a staging buffer to upload the mesh to the GPU
+    VkBufferCreateInfo buffer_create_info = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext = nullptr,
-        .size = model->vertices.size() * sizeof(Vertex),
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+        .size = buf_sz,
+        .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT // transfer commands only
     };
 
     // Set allocation properties for the buffer
-    const VmaAllocationCreateInfo alloc_create_info = {
-        .usage = VMA_MEMORY_USAGE_CPU_TO_GPU
+    VmaAllocationCreateInfo alloc_create_info = {
+        .usage = VMA_MEMORY_USAGE_CPU_ONLY
     };
 
-    // Allocate memory for the vertex buffer
+    // Allocate memory for the staging buffer
+    Buffer staging_buffer;
+    VK_CHECK(vmaCreateBuffer(
+        context.allocator,
+        &buffer_create_info,
+        &alloc_create_info,
+        &staging_buffer.buffer,
+        &staging_buffer.allocation,
+        nullptr)
+    );
+
+    // Map allocated memory to be accessible to the CPU
+    void* vertex_data;
+    vmaMapMemory(context.allocator, staging_buffer.allocation, &vertex_data);
+
+    // Copy memory into the buffer
+    memcpy(vertex_data, model->vertices.data(), buf_sz);
+
+    // Unmap the memory to release it back to the allocator
+    vmaUnmapMemory(context.allocator, staging_buffer.allocation);
+
+    // Create a vertex buffer for the model
+    buffer_create_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .pNext = nullptr,
+        .size = buf_sz,
+        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    };
+
+    alloc_create_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    // Allocate vertex buffer
     VK_CHECK(vmaCreateBuffer(
         context.allocator,
         &buffer_create_info,
@@ -1266,16 +1300,25 @@ void Application::upload_model(std::unique_ptr<Model>& model)
         nullptr)
     );
 
-    // Map allocated memory to be accessible to the CPU
-    void* vertex_data;
-    vmaMapMemory(context.allocator, model->vertex_buffer.allocation, &vertex_data);
+    immediate_submit(
+        [=](VkCommandBuffer cmd)
+        {
+            VkBufferCopy copy;
+            copy.dstOffset = 0;
+            copy.srcOffset = 0;
+            copy.size = buf_sz;
+            vkCmdCopyBuffer(
+                cmd, 
+                staging_buffer.buffer,
+                model->vertex_buffer.buffer, 
+                1, 
+                &copy
+            );
+        }
+    );
 
-    // Copy the model vertex data to the allocated memory block
-    const size_t buf_sz = model->vertices.size() * sizeof(Vertex);
-    memcpy(vertex_data, model->vertices.data(), buf_sz);
-
-    // Unmap the memory to release it back to the allocator
-    vmaUnmapMemory(context.allocator, model->vertex_buffer.allocation);
+    vmaDestroyBuffer(
+        context.allocator, staging_buffer.buffer, staging_buffer.allocation);
 
     // Add model to models in scene
     models.push_back(std::move(model));
@@ -1308,9 +1351,9 @@ void Application::pipe_cleanup(
     shader_stages.clear();
 }
 
-size_t Application::pad_uniform_buffer_size(size_t size)
+size_t Application::pad_uniform_buffer_size(size_t size) const
 {
-    size_t min_alignment =
+    const size_t min_alignment =
         context.gpu_properties.limits.minUniformBufferOffsetAlignment;
 
     size_t aligned_size = size;
@@ -1326,4 +1369,35 @@ size_t Application::pad_uniform_buffer_size(size_t size)
 
 void Application::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function)
 {
+    VkCommandBuffer cmd = upload_context.command_buffer;
+
+    // Begin recording
+    const VkCommandBufferBeginInfo cmd_buf_begin_info =
+        vkinit::command_buffer_begin_info(
+            VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VK_CHECK(vkBeginCommandBuffer(cmd, &cmd_buf_begin_info));
+
+    // Execute the function
+    function(cmd);
+
+    // End recording
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo submit = vkinit::submit_info(&cmd);
+
+    // Submit command buffer to queue and execute it
+    VK_CHECK(vkQueueSubmit(
+        context.queue, 
+        1, 
+        &submit, 
+        upload_context.upload_fence)
+    );
+
+    // Fence will block until all commands in the buffer have been executed
+    vkWaitForFences(
+        context.device, 1, &upload_context.upload_fence, true, TIMEOUT_PERIOD);
+    vkResetFences(context.device, 1, &upload_context.upload_fence);
+
+    // Reset command pool
+    vkResetCommandPool(context.device, upload_context.command_pool, 0);
 }

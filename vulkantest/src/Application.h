@@ -239,17 +239,18 @@ struct Application
         VmaMemoryUsage memory_usage
     ) const;
 
-    void upload_model(std::unique_ptr<Model> &model);
+    void upload_model(std::shared_ptr<Model> &model);
 
     PerFrame &get_current_frame();
 
     Model triangle = {};
 
-    std::vector<std::unique_ptr<Model>> models;
+    std::vector<std::shared_ptr<Model>> models;
 
     Camera camera;
 
-    size_t pad_uniform_buffer_size(size_t size);
+    [[nodiscard]]
+    size_t pad_uniform_buffer_size(size_t size) const;
 
     void immediate_submit(std::function<void(VkCommandBuffer cmd)> &&function);
 };
