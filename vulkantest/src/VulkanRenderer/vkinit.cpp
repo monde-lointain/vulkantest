@@ -31,6 +31,17 @@ vkinit::command_buffer_allocate_info(
     return command_buffer;
 }
 
+VkFenceCreateInfo
+vkinit::fence_create_info(VkFenceCreateFlags flags)
+{
+    const VkFenceCreateInfo fence_create_info = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = flags
+    };
+    return fence_create_info;
+}
+
 VkPipelineShaderStageCreateInfo
 vkinit::shader_stage_create_info(
     VkShaderStageFlagBits stage,
@@ -256,4 +267,33 @@ vkinit::write_descriptor_buffer(
         .pBufferInfo = buffer_info
     };
     return descriptor_write;
+}
+
+
+VkCommandBufferBeginInfo
+vkinit::command_buffer_begin_info(VkCommandBufferUsageFlags flags)
+{
+    VkCommandBufferBeginInfo command_buffer = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = nullptr,
+        .flags = flags,
+        .pInheritanceInfo = nullptr,
+    };
+    return command_buffer;
+}
+
+VkSubmitInfo vkinit::submit_info(VkCommandBuffer* command_buffer)
+{
+    const VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .pNext = nullptr,
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = nullptr,
+        .pWaitDstStageMask = nullptr,
+        .commandBufferCount = 1,
+        .pCommandBuffers = command_buffer,
+        .signalSemaphoreCount = 0,
+        .pSignalSemaphores = nullptr
+    };
+    return submit_info;
 }

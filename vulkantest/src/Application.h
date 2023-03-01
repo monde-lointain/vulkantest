@@ -14,14 +14,27 @@
 #include "VulkanRenderer/DeletionQueue.h"
 #include "Window/Window.h"
 
-constexpr int NUM_OVERLAPPING_FRAMES = 3;
-constexpr int MAX_DESCRIPTOR_SETS = 10;
+const int NUM_OVERLAPPING_FRAMES = 3;
+const int MAX_DESCRIPTOR_SETS = 10;
+const int MAX_OBJECTS = 10000;
 
 struct MeshPushConstants
 {
     glm::vec4 data;
     glm::mat4 modelviewprojection;
 };
+
+struct GPUObjectData
+{
+    glm::mat4 model_matrix;
+};
+
+struct UploadContext {
+    VkFence upload_fence;
+    VkCommandPool command_pool;
+    VkCommandBuffer command_buffer;
+};
+
 
 /** Per-frame data */
 struct PerFrame
@@ -36,9 +49,13 @@ struct PerFrame
 
     VkSemaphore swapchain_release_semaphore = nullptr;
 
-    Buffer mvp_uniform_buffer = {};
+    Buffer global_uniform_buffer = {};
 
     VkDescriptorSet global_descriptor_set = nullptr;
+
+    Buffer object_storage_buffer = {};
+
+    VkDescriptorSet object_descriptor_set = nullptr;
 };
 
 /** Vulkan objects and global state */
@@ -123,8 +140,9 @@ struct Context
     /** Per-frame data. */
     std::array<PerFrame, NUM_OVERLAPPING_FRAMES> frames;
 
-    /** Describes the layout of a descriptor set. */
-    VkDescriptorSetLayout descriptor_set_layout = nullptr;
+    /** Describes layouts of the descriptor sets. */
+    VkDescriptorSetLayout global_descriptor_set_layout = nullptr;
+    VkDescriptorSetLayout object_descriptor_set_layout = nullptr;
 
     /**
      * A pool of descriptor sets, which are allocated by the application at
@@ -193,8 +211,10 @@ struct Application
 
     void init_pipelines();
 
-    void pipe_cleanup(PipelineBuilder &builder,
-        std::vector<VkPipelineShaderStageCreateInfo> &shader_stages) const;
+    void pipe_cleanup(
+        PipelineBuilder &builder,
+        std::vector<VkPipelineShaderStageCreateInfo> &shader_stages
+    ) const;
 
     // void init_scene();
 
@@ -206,12 +226,18 @@ struct Application
 
     Context context;
 
+    UploadContext upload_context;
+
     DeletionQueue deletion_queue;
 
     void load_models();
 
-    [[nodiscard]] Buffer create_buffer(size_t alloc_size,
-        VkBufferUsageFlags usage, VmaMemoryUsage memory_usage) const;
+    [[nodiscard]]
+    Buffer create_buffer(
+        size_t alloc_size,
+        VkBufferUsageFlags usage, 
+        VmaMemoryUsage memory_usage
+    ) const;
 
     void upload_model(std::unique_ptr<Model> &model);
 
@@ -224,4 +250,6 @@ struct Application
     Camera camera;
 
     size_t pad_uniform_buffer_size(size_t size);
+
+    void immediate_submit(std::function<void(VkCommandBuffer cmd)> &&function);
 };

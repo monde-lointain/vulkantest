@@ -19,6 +19,9 @@ namespace vkinit
         VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
     );
 
+    VkFenceCreateInfo
+    fence_create_info(VkFenceCreateFlags flags = 0);
+
     VkPipelineShaderStageCreateInfo
     shader_stage_create_info(
         VkShaderStageFlagBits stage, 
@@ -86,4 +89,9 @@ namespace vkinit
         VkDescriptorBufferInfo* buffer_info,
         uint32_t binding
     );
+
+    VkCommandBufferBeginInfo
+    command_buffer_begin_info(VkCommandBufferUsageFlags flags);
+
+    VkSubmitInfo vkinit::submit_info(VkCommandBuffer* command_buffer);
 };	  // namespace vkinit

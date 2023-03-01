@@ -194,8 +194,7 @@ void Application::update()
     }
 }
 
-constexpr uint64_t ONE_SECOND = 1000000000;
-constexpr uint64_t TIMEOUT_PERIOD = ONE_SECOND;
+constexpr uint64_t TIMEOUT_PERIOD = UINT64_MAX;
 
 void Application::render()
 {
@@ -303,6 +302,7 @@ void Application::render()
         sinf(frame_delta), 0.0f, cosf(frame_delta), 1.0f
     };
 
+    // Copy scene data into uniform buffer
     char* scene_data;
     vmaMapMemory(
         context.allocator, 
@@ -316,30 +316,68 @@ void Application::render()
 
     vmaUnmapMemory(context.allocator, context.scene_data_buffer.allocation);
 
+    // Copy VP matrix into the uniform buffer
+    void* data;
+    vmaMapMemory(
+        context.allocator, 
+        frame.global_uniform_buffer.allocation, 
+        &data
+    );
+
+    memcpy(data, &camera.vp_matrix, sizeof(glm::mat4));
+
+    vmaUnmapMemory(context.allocator, frame.global_uniform_buffer.allocation);
+
+    // Write into object shader storage buffer by mapping the memory and casting
+    void* object_data;
+    vmaMapMemory(
+        context.allocator, 
+        frame.object_storage_buffer.allocation,
+        &object_data
+    );
+
+    GPUObjectData *object_SSBO = reinterpret_cast<GPUObjectData *>(object_data);
+
+    for (size_t i = 0; i < models.size(); i++)
+    {
+        object_SSBO[i].model_matrix = models[i]->transform;
+    }
+
+    vmaUnmapMemory(context.allocator, frame.object_storage_buffer.allocation);
+
+    // Bind object descriptor set to pipline
+    vkCmdBindDescriptorSets(
+        frame.primary_command_buffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        context.pipeline_layout,
+        1,
+        1,
+        &frame.object_descriptor_set,
+        0,
+        nullptr
+    );
+
     // Loop over all models in the scene
-    for (const std::unique_ptr<Model> &model : models)
+    for (size_t i = 0; i < models.size(); i++)
     {
         // Bind vertex buffer to the command buffer with an offset of zero
         const VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(frame.primary_command_buffer, 0, 1,
-            &model->vertex_buffer.buffer, &offset);
-
-        // Create MVP matrix
-        const glm::mat4 modelviewprojection =
-            camera.vp_matrix * model->transform;
-
-        // Copy MVP into the uniform buffer
-        void *data;
-        vmaMapMemory(
-            context.allocator, frame.mvp_uniform_buffer.allocation, &data);
-
-        memcpy(data, &modelviewprojection, sizeof(glm::mat4));
-
-        vmaUnmapMemory(context.allocator, frame.mvp_uniform_buffer.allocation);
+        vkCmdBindVertexBuffers(
+            frame.primary_command_buffer, 
+            0, 
+            1,
+            &models[i]->vertex_buffer.buffer, 
+            &offset
+        );
 
         // Draw the model
-        vkCmdDraw(frame.primary_command_buffer,
-            (uint32_t)model->vertices.size(), 1, 0, 0);
+        vkCmdDraw(
+            frame.primary_command_buffer,
+            (uint32_t)models[i]->vertices.size(), 
+            1, 
+            0, 
+            (uint32_t)i
+        );
     }
 
     // Finalize render stage commands
@@ -494,8 +532,15 @@ void Application::init_instance()
     context.gpu = vkb_gpu.physical_device;
 
     // Create a Vulkan device for the selected GPU
-    const vkb::DeviceBuilder device_builder(vkb_gpu);
-    const vkb::Device vkb_device = device_builder.build().value();
+    vkb::DeviceBuilder device_builder(vkb_gpu);
+    VkPhysicalDeviceShaderDrawParametersFeatures
+    shader_draw_parameters_features = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES,
+            .pNext = nullptr,
+            .shaderDrawParameters = VK_TRUE
+    };
+    const vkb::Device vkb_device =
+        device_builder.add_pNext(&shader_draw_parameters_features).build().value();
 
     context.device = vkb_device.device;
 
@@ -792,15 +837,12 @@ VkShaderModule Application::load_shader_module(const char* filename) const
 
 void Application::init_per_frames()
 {
-    const VkCommandPoolCreateInfo command_pool_create_info =
+    VkCommandPoolCreateInfo command_pool_create_info =
         vkinit::command_pool_create_info(
             context.graphics_queue_index, VK_COMMAND_POOL_CREATE_TRANSIENT_BIT);
 
-    const VkFenceCreateInfo fence_create_info = {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .pNext = nullptr,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT
-    };
+    VkFenceCreateInfo fence_create_info =
+        vkinit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
 
     const VkSemaphoreCreateInfo semaphore_create_info = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -846,14 +888,53 @@ void Application::init_per_frames()
             }
         );
     }
+
+    // Create fence for upload context
+    fence_create_info = vkinit::fence_create_info();
+    VK_CHECK(vkCreateFence(
+        context.device, 
+        &fence_create_info, 
+        nullptr,
+        &upload_context.upload_fence)
+    );
+
+    // Create command pool for upload context
+    command_pool_create_info =
+        vkinit::command_pool_create_info(context.graphics_queue_index);
+    VK_CHECK(vkCreateCommandPool(
+        context.device, 
+        &command_pool_create_info,
+        nullptr, 
+        &upload_context.command_pool)
+    );
+
+    // Allocate command buffer for upload context
+    const VkCommandBufferAllocateInfo alloc_info =
+        vkinit::command_buffer_allocate_info(upload_context.command_pool, 1);
+    VK_CHECK(vkAllocateCommandBuffers(
+        context.device, 
+        &alloc_info, 
+        &upload_context.command_buffer)
+    );
+
+    deletion_queue.push(
+        [=]()
+        {
+            vkDestroyFence(
+                context.device, upload_context.upload_fence, nullptr);
+            vkDestroyCommandPool(
+                context.device, upload_context.command_pool, nullptr);
+        }
+    );
 }
 
 void Application::init_descriptors()
 {
-    // Create a descriptor pool to allocate the descriptor sets
-    std::vector<VkDescriptorPoolSize> pool_sizes = {
+    // Create a descriptor pool to manage descriptor sets
+    const std::vector<VkDescriptorPoolSize> pool_sizes = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_DESCRIPTOR_SETS },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, MAX_DESCRIPTOR_SETS },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_DESCRIPTOR_SETS },
     };
 
     const VkDescriptorPoolCreateInfo descriptor_pool_create_info = {
@@ -863,7 +944,6 @@ void Application::init_descriptors()
         .poolSizeCount = (uint32_t)pool_sizes.size(),
         .pPoolSizes = pool_sizes.data()
     };
-
     VK_CHECK(vkCreateDescriptorPool(
         context.device,
         &descriptor_pool_create_info,
@@ -871,8 +951,8 @@ void Application::init_descriptors()
         &context.descriptor_pool)
     );
 
-    // Create descriptor set layouts for the uniform buffer objects
-    const VkDescriptorSetLayoutBinding mvp_binding =
+    // Create descriptor set layout for the uniform buffer objects
+    const VkDescriptorSetLayoutBinding global_binding =
         vkinit::descriptorset_layout_binding(
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
 
@@ -882,23 +962,41 @@ void Application::init_descriptors()
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 1);
 
     const std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
-        mvp_binding,
+        global_binding,
         scene_binding
     };
 
-    const VkDescriptorSetLayoutCreateInfo layout_info = {
+    VkDescriptorSetLayoutCreateInfo layout_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
         .bindingCount = 2,
         .pBindings = bindings.data()
     };
-
     VK_CHECK(vkCreateDescriptorSetLayout(
         context.device, 
         &layout_info, 
         nullptr, 
-        &context.descriptor_set_layout)
+        &context.global_descriptor_set_layout)
+    );
+
+    // Create descriptor set layout for the object storage buffer
+    const VkDescriptorSetLayoutBinding object_binding =
+        vkinit::descriptorset_layout_binding(
+            VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
+
+    layout_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .bindingCount = 1,
+        .pBindings = &object_binding
+    };
+    VK_CHECK(vkCreateDescriptorSetLayout(
+        context.device,
+        &layout_info,
+        nullptr,
+        &context.object_descriptor_set_layout)
     );
 
     // Create scene UBO
@@ -918,43 +1016,69 @@ void Application::init_descriptors()
     };
 
     VkDescriptorSetAllocateInfo alloc_info;
-    VkDescriptorBufferInfo mvp_buffer_info;
-    std::array<VkWriteDescriptorSet, 2> descriptor_writes;
-    for (int i = 0; i < NUM_OVERLAPPING_FRAMES; i++)
+    VkDescriptorBufferInfo global_buffer_info;
+    VkDescriptorBufferInfo object_buffer_info;
+    std::array<VkWriteDescriptorSet, 3> descriptor_writes;
+    for (PerFrame& frame : context.frames)
     {
-        // Create frame UBO
-        context.frames[i].mvp_uniform_buffer = create_buffer(sizeof(glm::mat4),
+        // Create global uniform buffer and object storage buffer
+        frame.global_uniform_buffer = create_buffer(sizeof(glm::mat4),
             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-        // Allocate a descriptor set
+        frame.object_storage_buffer = create_buffer(
+            sizeof(GPUObjectData) * MAX_OBJECTS,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+        // Allocate descriptor sets for the global uniform buffer and object
+        // storage buffer
         alloc_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             .descriptorPool = context.descriptor_pool,
             .descriptorSetCount = 1,
-            .pSetLayouts = &context.descriptor_set_layout
+            .pSetLayouts = &context.global_descriptor_set_layout
         };
         VK_CHECK(vkAllocateDescriptorSets(
             context.device, 
             &alloc_info,
-            &context.frames[i].global_descriptor_set)
+            &frame.global_descriptor_set)
         );
 
-        // Bind uniform buffer objects to the descriptor set
-        mvp_buffer_info = {
-            .buffer = context.frames[i].mvp_uniform_buffer.buffer,
+        alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = context.descriptor_pool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &context.object_descriptor_set_layout
+        };
+        VK_CHECK(vkAllocateDescriptorSets(
+            context.device,
+            &alloc_info,
+            &frame.object_descriptor_set)
+        );
+
+        // Bind buffer objects to their descriptor sets
+        global_buffer_info = {
+            .buffer = frame.global_uniform_buffer.buffer,
             .offset = 0,
             .range = sizeof(glm::mat4)
         };
 
-        descriptor_writes = {
-            vkinit::write_descriptor_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                context.frames[i].global_descriptor_set, &mvp_buffer_info, 0),
-            vkinit::write_descriptor_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-                context.frames[i].global_descriptor_set, &scene_buffer_info, 1)
+        object_buffer_info = {
+            .buffer = frame.object_storage_buffer.buffer,
+            .offset = 0,
+            .range = sizeof(GPUObjectData) * MAX_OBJECTS
         };
 
+        descriptor_writes = {
+            vkinit::write_descriptor_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                frame.global_descriptor_set, &global_buffer_info, 0),
+            vkinit::write_descriptor_buffer(
+                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                frame.global_descriptor_set, &scene_buffer_info, 1),
+            vkinit::write_descriptor_buffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                frame.object_descriptor_set, &object_buffer_info, 0)
+        };
         vkUpdateDescriptorSets(
-            context.device, 2, descriptor_writes.data(), 0, nullptr);
+            context.device, 3, descriptor_writes.data(), 0, nullptr);
     }
 
     deletion_queue.push(
@@ -964,15 +1088,20 @@ void Application::init_descriptors()
                 context.scene_data_buffer.buffer,
                 context.scene_data_buffer.allocation);
             vkDestroyDescriptorSetLayout(
-                context.device, context.descriptor_set_layout, nullptr);
+                context.device, context.global_descriptor_set_layout, nullptr);
+            vkDestroyDescriptorSetLayout(
+                context.device, context.object_descriptor_set_layout, nullptr);
             vkDestroyDescriptorPool(
                 context.device, context.descriptor_pool, nullptr);
 
             for (const PerFrame &frame : context.frames)
             {
                 vmaDestroyBuffer(context.allocator,
-                    frame.mvp_uniform_buffer.buffer,
-                    frame.mvp_uniform_buffer.allocation);
+                    frame.object_storage_buffer.buffer,
+                    frame.object_storage_buffer.allocation);
+                vmaDestroyBuffer(context.allocator,
+                    frame.global_uniform_buffer.buffer,
+                    frame.global_uniform_buffer.allocation);
             }
         }
     );
@@ -1002,9 +1131,13 @@ void Application::init_pipelines()
     // Fill pipeline layout struct
     VkPipelineLayoutCreateInfo layout_info = vkinit::pipeline_layout_create_info();
 
-    // Specify descriptor set layout
-    layout_info.setLayoutCount = 1;
-    layout_info.pSetLayouts = &context.descriptor_set_layout;
+    // Specify descriptor set layouts
+    std::array<VkDescriptorSetLayout, 2> set_layouts = {
+        context.global_descriptor_set_layout,
+        context.object_descriptor_set_layout,
+    };
+    layout_info.setLayoutCount = 2;
+    layout_info.pSetLayouts = set_layouts.data();
 
     // Create pipeline layout
     VK_CHECK(vkCreatePipelineLayout(
@@ -1063,10 +1196,11 @@ void Application::load_models()
 
     std::unique_ptr<Model> cube = create_model("assets/models/koopa/koopa.obj");
 
-    if (cube)
-    {
-        upload_model(cube);
-    }
+    std::unique_ptr<Model> robot = create_model("assets/models/robot/robot.obj");
+    robot->translation = glm::vec3(0.0f, 30.0f, 0.0f);
+
+    upload_model(cube);
+    upload_model(robot);
 }
 
 Buffer Application::create_buffer(
@@ -1104,6 +1238,11 @@ Buffer Application::create_buffer(
 
 void Application::upload_model(std::unique_ptr<Model>& model)
 {
+    if (!model)
+    {
+        return;
+    }
+
     // Specify info about the vertex buffer to create
     const VkBufferCreateInfo buffer_create_info = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -1183,4 +1322,8 @@ size_t Application::pad_uniform_buffer_size(size_t size)
     }
 
     return aligned_size;
+}
+
+void Application::immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function)
+{
 }
